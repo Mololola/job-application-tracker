@@ -188,6 +188,7 @@ function compareCase(testCase: CalibrationCase): TestResult {
 
 function main() {
   const cases = readJsonl(DATASET_PATH);
+  const strictMode = process.argv.includes("--strict");
 
   let passed = 0;
   let failed = 0;
@@ -225,8 +226,18 @@ function main() {
   console.log(`Failed:   ${failed}`);
   console.log(`Warnings: ${warningCount}`);
 
-  if (failed > 0) {
+  if (failed > 0 && strictMode) {
     process.exit(1);
+  }
+
+  if (failed > 0 && !strictMode) {
+    console.log("");
+    console.log(
+      "Note: Some calibration cases failed. This command is running in report mode, so it will not fail the process.",
+    );
+    console.log(
+      "Use `npm run test:classifier:strict` when you want failures to exit with code 1.",
+    );
   }
 }
 

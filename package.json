@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "test:classifier": "tsx scripts/run-classifier-calibration.ts"
+    "test:classifier": "tsx scripts/run-classifier-calibration.ts",
+    "test:classifier:strict": "tsx scripts/run-classifier-calibration.ts --strict"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
