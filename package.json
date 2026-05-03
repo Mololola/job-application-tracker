@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "test:classifier": "tsx scripts/run-classifier-calibration.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
@@ -24,6 +25,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "prisma": "^6.19.0",
+    "tsx": "^4.21.0",
     "typescript": "latest"
   }
 }
