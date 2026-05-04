@@ -918,11 +918,12 @@ function extractStructuredPosition(
   subject: string,
 ): string | null {
   const subjectPositionPatterns = [
-    /thank you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n|:]{2,120})/i,
+    /thank you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n.!?]{2,90}?)\s+position\s+(?:at|with|for)\s+/i,
+    /thank you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n.!?]{2,90}?)\s+(?:role|vacancy)\b/i,
     /tu solicitud para el puesto(?: de)?\s+([^\n]{2,120}?)\s+en\s+/i,
     /tu candidatura para el puesto(?: de)?\s+([^\n]{2,120}?)\s+en\s+/i,
     /solicitud en indeed\s*:\s*([^\n|:]{2,120})/i,
-    /has enviado correctamente tu (?:candidatura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
+    /has enviado correctamente tu (?:candidat ura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /hemos recibido correctamente tu (?:candidatura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /next steps on your application\s*[-–—:]\s*([^\n|:]{2,120})/i,
   ];
@@ -957,8 +958,25 @@ function extractCompany(
   const compact = cleanWhitespace(textWithNewlines);
   const lines = firstUsefulLine(textWithNewlines);
   const lineText = lines.join("\n");
+  const linkedInCardCompanyMatches = [
+    ...compact.matchAll(
+      /([^.\n\r]{4,90})\.\s+(.{2,90}?)\.\s+(?:solicitado|applied on)\b/gi,
+    ),
+  ];
+
+  for (const match of linkedInCardCompanyMatches) {
+    const possibleRole = cleanupPosition(match[1] ?? "");
+    if (!possibleRole || !looksLikeRoleCandidate(possibleRole)) continue;
+
+    const company = cleanupCompany(match[2] ?? "");
+    if (company) return company;
+  }
 
   const subjectPatterns = [
+    /has enviado correctamente tu (?:candidatura|solicitud) para el puesto(?: de)? [^\n]{2,140}\s+en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9&.,'’+\- ]{2,120})/iu,
+    /hemos recibido correctamente tu (?:candidatura|solicitud) para el puesto(?: de)? [^\n]{2,140}\s+en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9&.,'’+\- ]{2,120})/iu,
+    /tu solicitud para el puesto(?: de)? [^\n]{2,120}\s+en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9&.,'’+\- ]{2,120})/iu,
+    /tu candidatura para el puesto(?: de)? [^\n]{2,120}\s+en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9&.,'’+\- ]{2,120})/iu,
     /tu actualizaci[oó]n de\s+([A-Za-z0-9&.,'’+\- ]{2,80})/i,
     /se ha enviado tu solicitud a\s+([A-Za-z0-9&.,'’+\- ]{2,80})/i,
     /se ha enviado tu candidatura a\s+([A-Za-z0-9&.,'’+\- ]{2,80})/i,
@@ -1070,10 +1088,21 @@ function extractPosition(
   const lines = firstUsefulLine(combined);
   const structuredPosition = extractStructuredPosition(lines, subject);
   if (structuredPosition) return structuredPosition;
+  const linkedInCardPositionMatches = [
+    ...compact.matchAll(
+      /([^.\n\r]{4,90})\.\s+(.{2,90}?)\.\s+(?:solicitado|applied on)\b/gi,
+    ),
+  ];
+
+  for (const match of linkedInCardPositionMatches) {
+    const position = cleanupPosition(match[1] ?? "");
+    if (position && looksLikeRoleCandidate(position)) return position;
+  }
 
   const patterns = [
     /solicitud en indeed\s*:\s*([^\n|:]{2,120})/i,
-    /thank\s+you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n|:]{2,130})/i,
+    /thank\s+you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n.!?]{2,90}?)\s+position\s+(?:at|with|for)\s+/i,
+    /thank\s+you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n.!?]{2,90}?)\s+(?:role|vacancy)\b/i,
     /tu solicitud para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /tu candidatura para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /has enviado correctamente tu (?:candidatura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
