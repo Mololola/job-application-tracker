@@ -295,3 +295,17 @@ textarea {
   color: #b42318;
   font-weight: 600;
 }
+
+.danger-card {
+  border-color: #f1c2c2;
+  background: #fffafa;
+}
+
+.merge-summary,
+.merge-target-preview {
+  margin-top: 1rem;
+  border: 1px solid #d0d7de;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: white;
+}

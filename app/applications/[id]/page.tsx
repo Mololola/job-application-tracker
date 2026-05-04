@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from "@/lib/prisma";
 import EditApplicationForm from "@/components/EditApplicationForm";
+import MergeApplicationForm from "@/components/MergeApplicationForm";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,28 @@ export default async function ApplicationDetailPage({
   });
 
   if (!application) notFound();
+
+  const mergeCandidates = await prisma.application.findMany({
+    where: {
+      userId: user.id,
+      id: {
+        not: application.id,
+      },
+    },
+    select: {
+      id: true,
+      company: true,
+      position: true,
+      status: true,
+      updatedAt: true,
+    },
+    orderBy: [
+      {
+        updatedAt: "desc",
+      },
+    ],
+    take: 100,
+  });
 
   return (
     <div className="grid">
@@ -83,6 +106,21 @@ export default async function ApplicationDetailPage({
           </p>
         </div>
       </section>
+
+      <MergeApplicationForm
+        sourceApplication={{
+          id: application.id,
+          company: application.company,
+          position: application.position,
+        }}
+        candidates={mergeCandidates.map((candidate) => ({
+          id: candidate.id,
+          company: candidate.company,
+          position: candidate.position,
+          status: candidate.status,
+          updatedAt: candidate.updatedAt.toISOString(),
+        }))}
+      />
 
       <section className="card">
         <h2>Email timeline</h2>
