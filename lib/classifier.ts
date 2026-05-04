@@ -284,6 +284,11 @@ const applicationConfirmationPhrases = [
   "tu candidatura para el puesto",
   "has enviado correctamente",
   "hemos recibido correctamente",
+  "tu solicitud ha sido enviada",
+  "tu candidatura ha sido enviada",
+  "los siguientes documentos se han enviado",
+  "se han enviado a",
+  "se ha enviado tu solicitud",
   "solicitado el",
   "applied on",
 ];
@@ -770,7 +775,10 @@ function looksLikeCompany(value: string | null | undefined): value is string {
 
 function cleanupCompany(value: string): string | null {
   const cleaned = trimJunk(stripLeadingArticles(removeTrailingNoise(value)))
-    .replace(/\s*[-–—|]\s*(?:workday|myworkday|greenhouse|lever|ashby|ashbyhq|smartrecruiters|icims|successfactors|oraclecloud|jobvite|bamboohr|personio|teamtailor)\s*$/i, "")
+    .replace(
+      /\s*[-–—|]\s*(?:workday|myworkday|greenhouse|lever|ashby|ashbyhq|smartrecruiters|icims|successfactors|oraclecloud|jobvite|bamboohr|personio|teamtailor)\s*$/i,
+      "",
+    )
     .replace(
       /\b(?:for|para|por|as|como|role|position|puesto|vacante)\b.*$/i,
       "",
@@ -791,7 +799,12 @@ function looksLikePersonName(value: string | null | undefined): boolean {
   const cleaned = value.replace(/["']/g, "").trim();
   const parts = cleaned.split(/\s+/).filter(Boolean);
   if (parts.length < 2 || parts.length > 3) return false;
-  if (/\b(team|careers|recruitment|recruiting|talent|hr|jobs|support|no.?reply|notifications?)\b/i.test(cleaned)) return false;
+  if (
+    /\b(team|careers|recruitment|recruiting|talent|hr|jobs|support|no.?reply|notifications?)\b/i.test(
+      cleaned,
+    )
+  )
+    return false;
   return parts.every((part) => /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ'’-]{1,}$/.test(part));
 }
 
@@ -805,7 +818,9 @@ function extractCompanyFromEmail(from: string): string | null {
   // Many recruiter emails use a real person's name as the display name
   // (for example Dan Shone <dan.shone-external@getyourguide.com>). Prefer the
   // company domain in those cases instead of saving the recruiter as the company.
-  const displayCompany = looksLikePersonName(display) ? null : cleanupCompany(display);
+  const displayCompany = looksLikePersonName(display)
+    ? null
+    : cleanupCompany(display);
   if (displayCompany) return displayCompany;
 
   if (!domain) return null;
@@ -846,13 +861,24 @@ function firstUsefulLine(text: string): string[] {
 function looksLikeRoleCandidate(value: string | null | undefined): boolean {
   if (!value) return false;
   const normalized = normalizeForMatching(value);
-  if (!normalized || normalized.length < 4 || normalized.length > 120) return false;
+  if (!normalized || normalized.length < 4 || normalized.length > 120)
+    return false;
   if (containsAny(normalized, nonApplicationPhrases)) return false;
-  if (/^(junior|senior|graduate|intern|internship|role|position|puesto|cargo)$/i.test(normalized)) return false;
-  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|disenador|diseñador|analista|datos|producto)\b/i.test(normalized);
+  if (
+    /^(junior|senior|graduate|intern|internship|role|position|puesto|cargo)$/i.test(
+      normalized,
+    )
+  )
+    return false;
+  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|disenador|diseñador|analista|datos|producto)\b/i.test(
+    normalized,
+  );
 }
 
-function extractStructuredCompany(lines: string[], subject: string): string | null {
+function extractStructuredCompany(
+  lines: string[],
+  subject: string,
+): string | null {
   const subjectCompanyPatterns = [
     /tu actualizaci[oó]n de\s+([^\n]{2,80})/i,
     /se ha enviado tu solicitud a\s+([^\n]{2,80})/i,
@@ -874,7 +900,12 @@ function extractStructuredCompany(lines: string[], subject: string): string | nu
     const left = line.split(/[·•]/)[0]?.trim();
     const company = cleanupCompany(left ?? "");
     const previous = lines[index - 1];
-    if (company && (!previous || looksLikeRoleCandidate(previous) || /recruiter|talent|sourcing/i.test(previous))) {
+    if (
+      company &&
+      (!previous ||
+        looksLikeRoleCandidate(previous) ||
+        /recruiter|talent|sourcing/i.test(previous))
+    ) {
       return company;
     }
   }
@@ -882,11 +913,15 @@ function extractStructuredCompany(lines: string[], subject: string): string | nu
   return null;
 }
 
-function extractStructuredPosition(lines: string[], subject: string): string | null {
+function extractStructuredPosition(
+  lines: string[],
+  subject: string,
+): string | null {
   const subjectPositionPatterns = [
     /thank you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n|:]{2,120})/i,
     /tu solicitud para el puesto(?: de)?\s+([^\n]{2,120}?)\s+en\s+/i,
     /tu candidatura para el puesto(?: de)?\s+([^\n]{2,120}?)\s+en\s+/i,
+    /solicitud en indeed\s*:\s*([^\n|:]{2,120})/i,
     /has enviado correctamente tu (?:candidatura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /hemos recibido correctamente tu (?:candidatura|solicitud) para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /next steps on your application\s*[-–—:]\s*([^\n|:]{2,120})/i,
@@ -933,6 +968,8 @@ function extractCompany(
     /tu candidatura para el puesto de [^\n]{2,120}\s+en\s+([A-Za-z0-9&.,'’+\- ]{2,80})/i,
     /update on your application\s*@\s*([A-Za-z0-9&.,'’+\- ]{2,70})/i,
     /application\s*@\s*([A-Za-z0-9&.,'’+\- ]{2,70})/i,
+    /los siguientes documentos se han enviado a\s+([A-Za-z0-9&.,'’+\- ]{2,100})/i,
+    /documentos se han enviado a\s+([A-Za-z0-9&.,'’+\- ]{2,100})/i,
     /your application\s+to\s+([A-Za-z0-9&.,'’+\- ]{2,70})\s+has\s+been\s+(?:viewed|read)/i,
     /update on your application for the role of [^\n.!?]{2,120}\s+with\s+([A-Za-z0-9&.,'’+\- ]{2,70})/i,
     /application for [^\n.!?]{2,120}\s+(?:at|with)\s+([A-Za-z0-9&.,'’+\- ]{2,70})/i,
@@ -1010,7 +1047,9 @@ function cleanupPosition(value: string): string | null {
   if (cleaned.length < 2) return null;
   if (cleaned.length > 100) return null;
   if (
-    /^(the|this|our|your|my|an?|for|el|la|los|las|tu|su|para|junior|senior|graduate|intern|internship)$/i.test(cleaned)
+    /^(the|this|our|your|my|an?|for|el|la|los|las|tu|su|para|junior|senior|graduate|intern|internship)$/i.test(
+      cleaned,
+    )
   )
     return null;
   if (
@@ -1033,6 +1072,7 @@ function extractPosition(
   if (structuredPosition) return structuredPosition;
 
   const patterns = [
+    /solicitud en indeed\s*:\s*([^\n|:]{2,120})/i,
     /thank\s+you\s+(?:for|in)\s+your\s+interest\s+in\s+(?:the\s+)?([^\n|:]{2,130})/i,
     /tu solicitud para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
     /tu candidatura para el puesto(?: de)?\s+([^\n]{2,130}?)\s+en\s+/i,
@@ -1074,7 +1114,10 @@ function extractPosition(
 
 function parseEnglishMonthDate(value: string): Date | null {
   const cleaned = value
-    .replace(/\b(mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b,?/gi, " ")
+    .replace(
+      /\b(mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b,?/gi,
+      " ",
+    )
     .replace(/\b(CEST|CET|GMT|BST|UTC)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -1084,25 +1127,46 @@ function parseEnglishMonthDate(value: string): Date | null {
 
 function parseSpanishMonthDate(value: string): Date | null {
   const months: Record<string, number> = {
-    enero: 0, ene: 0,
-    febrero: 1, feb: 1,
-    marzo: 2, mar: 2,
-    abril: 3, abr: 3,
-    mayo: 4, may: 4,
-    junio: 5, jun: 5,
-    julio: 6, jul: 6,
-    agosto: 7, ago: 7,
-    septiembre: 8, setiembre: 8, sep: 8,
-    octubre: 9, oct: 9,
-    noviembre: 10, nov: 10,
-    diciembre: 11, dic: 11,
+    enero: 0,
+    ene: 0,
+    febrero: 1,
+    feb: 1,
+    marzo: 2,
+    mar: 2,
+    abril: 3,
+    abr: 3,
+    mayo: 4,
+    may: 4,
+    junio: 5,
+    jun: 5,
+    julio: 6,
+    jul: 6,
+    agosto: 7,
+    ago: 7,
+    septiembre: 8,
+    setiembre: 8,
+    sep: 8,
+    octubre: 9,
+    oct: 9,
+    noviembre: 10,
+    nov: 10,
+    diciembre: 11,
+    dic: 11,
   };
-  const match = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/(\d{1,2})\s*(?:de\s*)?([a-z]+)\s*(?:de\s*)?(\d{4})?(?:\s*[·,\-–—]?\s*(\d{1,2}):(\d{2}))?/i);
+  const match = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .match(
+      /(\d{1,2})\s*(?:de\s*)?([a-z]+)\s*(?:de\s*)?(\d{4})?(?:\s*[·,\-–—]?\s*(\d{1,2}):(\d{2}))?/i,
+    );
   if (!match) return null;
   const day = Number.parseInt(match[1], 10);
   const month = months[match[2]];
   if (month === undefined) return null;
-  const year = match[3] ? Number.parseInt(match[3], 10) : new Date().getFullYear();
+  const year = match[3]
+    ? Number.parseInt(match[3], 10)
+    : new Date().getFullYear();
   const hour = match[4] ? Number.parseInt(match[4], 10) : 9;
   const minute = match[5] ? Number.parseInt(match[5], 10) : 0;
   return new Date(year, month, day, hour, minute);
@@ -1145,16 +1209,24 @@ function extractDeadline(text: string): Date | null {
   }
 
   const englishEventDate =
-    text.match(/\b(?:mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b,?\s+(\d{1,2}\s+[A-Z][a-z]+\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:am|pm)?)?)/i)?.[1] ??
-    text.match(/\b(\d{1,2}\s+[A-Z][a-z]+\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm)?)/i)?.[1];
+    text.match(
+      /\b(?:mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b,?\s+(\d{1,2}\s+[A-Z][a-z]+\s+\d{4}(?:\s+\d{1,2}:\d{2}\s*(?:am|pm)?)?)/i,
+    )?.[1] ??
+    text.match(
+      /\b(\d{1,2}\s+[A-Z][a-z]+\s+\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm)?)/i,
+    )?.[1];
   if (englishEventDate) {
     const parsed = parseEnglishMonthDate(englishEventDate);
     if (parsed) return parsed;
   }
 
   const spanishEventDate =
-    text.match(/\b(?:lun|lunes|mar|martes|mie|miercoles|miércoles|jue|jueves|vie|viernes|sab|sáb|sabado|sábado|dom|domingo)\b,?\s+(\d{1,2}\s*(?:de\s*)?[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12}(?:\s*(?:de\s*)?\d{4})?(?:\s*[·,\-–—]?\s*\d{1,2}:\d{2})?)/i)?.[1] ??
-    text.match(/\b(\d{1,2}\s+de\s+[A-Za-zÁÉÍÓÚáéíóúñÑ]+\s+de\s+\d{4}(?:\s+\d{1,2}:\d{2})?)/i)?.[1];
+    text.match(
+      /\b(?:lun|lunes|mar|martes|mie|miercoles|miércoles|jue|jueves|vie|viernes|sab|sáb|sabado|sábado|dom|domingo)\b,?\s+(\d{1,2}\s*(?:de\s*)?[A-Za-zÁÉÍÓÚáéíóúñÑ]{3,12}(?:\s*(?:de\s*)?\d{4})?(?:\s*[·,\-–—]?\s*\d{1,2}:\d{2})?)/i,
+    )?.[1] ??
+    text.match(
+      /\b(\d{1,2}\s+de\s+[A-Za-zÁÉÍÓÚáéíóúñÑ]+\s+de\s+\d{4}(?:\s+\d{1,2}:\d{2})?)/i,
+    )?.[1];
   if (spanishEventDate) {
     const parsed = parseSpanishMonthDate(spanishEventDate);
     if (parsed) return parsed;
@@ -1245,7 +1317,10 @@ function classifyBySignals(
     applicationConfirmationPhrases,
   );
   const isViewedOrRead = containsAny(normalizedText, viewedOrReadPhrases);
-  const isApplicationUpdate = containsAny(normalizedText, applicationUpdatePhrases);
+  const isApplicationUpdate = containsAny(
+    normalizedText,
+    applicationUpdatePhrases,
+  );
   const taskDone = isTaskCompletion(normalizedText);
 
   // Terminal/explicit outcomes win even if the email came from a job board.
@@ -1280,8 +1355,10 @@ function classifyBySignals(
       eventType: "FOLLOW_UP",
       taskType: null,
       confidence:
-        0.86 + Math.min(0.05, countHits(normalizedText, taskCompletionPhrases) * 0.01),
-      summary: "Task completion confirmation detected. Existing matching tasks should be marked done.",
+        0.86 +
+        Math.min(0.05, countHits(normalizedText, taskCompletionPhrases) * 0.01),
+      summary:
+        "Task completion confirmation detected. Existing matching tasks should be marked done.",
     };
   }
 
@@ -1289,7 +1366,10 @@ function classifyBySignals(
   // This catches LinkedIn/recruiter messages like "Next steps on your application" and
   // "we'd love for you to take the next step: a short AI-led interview".
   const earlyActionRequired = hasTaskAction(normalizedText);
-  const earlyAiComplete = containsAny(normalizedText, aiInterviewCompletePhrases);
+  const earlyAiComplete = containsAny(
+    normalizedText,
+    aiInterviewCompletePhrases,
+  );
   const earlyInterviewConcrete = containsAny(normalizedText, [
     "interview request",
     "interview invitation",
@@ -1313,17 +1393,32 @@ function classifyBySignals(
     "siguientes pasos de tu solicitud",
     "avanzar con el proceso de entrevista",
   ]);
-  const earlyCoding = containsAny(normalizedText, codingTaskPhrases) && earlyActionRequired && !taskDone;
-  const earlyAiInterview = containsAny(normalizedText, aiInterviewPhrases) && (earlyActionRequired || earlyInterviewConcrete) && !earlyAiComplete && !taskDone;
-  const earlyInterview = containsAny(normalizedText, strongInterviewPhrases) && (earlyActionRequired || earlyInterviewConcrete) && !taskDone;
-  const earlyAssessment = containsAny(normalizedText, assessmentPhrases) && earlyActionRequired && !taskDone;
+  const earlyCoding =
+    containsAny(normalizedText, codingTaskPhrases) &&
+    earlyActionRequired &&
+    !taskDone;
+  const earlyAiInterview =
+    containsAny(normalizedText, aiInterviewPhrases) &&
+    (earlyActionRequired || earlyInterviewConcrete) &&
+    !earlyAiComplete &&
+    !taskDone;
+  const earlyInterview =
+    containsAny(normalizedText, strongInterviewPhrases) &&
+    (earlyActionRequired || earlyInterviewConcrete) &&
+    !taskDone;
+  const earlyAssessment =
+    containsAny(normalizedText, assessmentPhrases) &&
+    earlyActionRequired &&
+    !taskDone;
 
   if (!recommendationOrAlert && earlyCoding) {
     return {
       status: "CODING_TASK",
       eventType: "CODING_TEST_RECEIVED",
       taskType: "CODING_TASK",
-      confidence: 0.9 + Math.min(0.05, countHits(normalizedText, codingTaskPhrases) * 0.01),
+      confidence:
+        0.9 +
+        Math.min(0.05, countHits(normalizedText, codingTaskPhrases) * 0.01),
       summary: "Coding task or technical assessment action required.",
     };
   }
@@ -1333,7 +1428,9 @@ function classifyBySignals(
       status: "AI_INTERVIEW",
       eventType: "AI_INTERVIEW_INVITE",
       taskType: "AI_INTERVIEW",
-      confidence: 0.9 + Math.min(0.05, countHits(normalizedText, aiInterviewPhrases) * 0.01),
+      confidence:
+        0.9 +
+        Math.min(0.05, countHits(normalizedText, aiInterviewPhrases) * 0.01),
       summary: "AI/video interview action required.",
     };
   }
@@ -1343,7 +1440,12 @@ function classifyBySignals(
       status: "INTERVIEW",
       eventType: "INTERVIEW_INVITE",
       taskType: "NORMAL_INTERVIEW",
-      confidence: 0.87 + Math.min(0.06, countHits(normalizedText, strongInterviewPhrases) * 0.01),
+      confidence:
+        0.87 +
+        Math.min(
+          0.06,
+          countHits(normalizedText, strongInterviewPhrases) * 0.01,
+        ),
       summary: "Interview scheduling or attendance action required.",
     };
   }
@@ -1353,8 +1455,25 @@ function classifyBySignals(
       status: "ASSESSMENT",
       eventType: "ASSESSMENT_RECEIVED",
       taskType: "ASSESSMENT",
-      confidence: 0.84 + Math.min(0.05, countHits(normalizedText, assessmentPhrases) * 0.01),
+      confidence:
+        0.84 +
+        Math.min(0.05, countHits(normalizedText, assessmentPhrases) * 0.01),
       summary: "Assessment or online test action required.",
+    };
+  }
+
+  // Viewed/read updates must win before generic confirmation phrases.
+  // LinkedIn viewed emails often include phrases like "solicitado el", which
+  // can otherwise look like a fresh application confirmation.
+  if (isViewedOrRead) {
+    return {
+      status: "APPLIED",
+      eventType: "FOLLOW_UP",
+      taskType: null,
+      confidence:
+        0.82 +
+        Math.min(0.08, countHits(normalizedText, viewedOrReadPhrases) * 0.01),
+      summary: "Application viewed/read follow-up detected. No task required.",
     };
   }
 
@@ -1375,7 +1494,11 @@ function classifyBySignals(
     };
   }
 
-  if (isViewedOrRead || isApplicationUpdate || isHarmlessConfirmationNoise(normalizedText)) {
+  if (
+    isViewedOrRead ||
+    isApplicationUpdate ||
+    isHarmlessConfirmationNoise(normalizedText)
+  ) {
     return {
       status: "APPLIED",
       eventType: "FOLLOW_UP",
@@ -1413,14 +1536,23 @@ function classifyBySignals(
     "entrevista programada",
     "entrevista introductoria",
   ]);
-  const isCoding = containsAny(normalizedText, codingTaskPhrases) && actionRequired && !taskDone;
+  const isCoding =
+    containsAny(normalizedText, codingTaskPhrases) &&
+    actionRequired &&
+    !taskDone;
   const isAiInterview =
-    containsAny(normalizedText, aiInterviewPhrases) && actionRequired && !aiComplete && !taskDone;
+    containsAny(normalizedText, aiInterviewPhrases) &&
+    actionRequired &&
+    !aiComplete &&
+    !taskDone;
   const isInterview =
     containsAny(normalizedText, strongInterviewPhrases) &&
     (actionRequired || scheduledOrConcreteInterview) &&
     !taskDone;
-  const isAssessment = containsAny(normalizedText, assessmentPhrases) && actionRequired && !taskDone;
+  const isAssessment =
+    containsAny(normalizedText, assessmentPhrases) &&
+    actionRequired &&
+    !taskDone;
 
   if (isCoding) {
     return {
@@ -1467,7 +1599,8 @@ function classifyBySignals(
       eventType: "ASSESSMENT_RECEIVED",
       taskType: "ASSESSMENT",
       confidence:
-        0.8 + Math.min(0.05, countHits(normalizedText, assessmentPhrases) * 0.01),
+        0.8 +
+        Math.min(0.05, countHits(normalizedText, assessmentPhrases) * 0.01),
       summary: "Assessment or online test action required.",
     };
   }
@@ -1508,7 +1641,9 @@ function hasGenericJobApplicationSignal(normalizedText: string): boolean {
       "candidatura recibida",
       "solicitud recibida",
     ]) ||
-    /\bapplication\s+for\s+[a-z0-9 .,+#&\-/]{2,120}\s+(has been|was|is|at|with)\b/i.test(normalizedText)
+    /\bapplication\s+for\s+[a-z0-9 .,+#&\-/]{2,120}\s+(has been|was|is|at|with)\b/i.test(
+      normalizedText,
+    )
   );
 }
 
@@ -1518,7 +1653,11 @@ function shouldSkipAmbiguousRecruiterEmail(
 ): boolean {
   const normalizedSubject = normalizeForMatching(subject);
   return (
-    containsAny(normalizedSubject, ["role discussed", "job spec", "role spec"]) ||
+    containsAny(normalizedSubject, [
+      "role discussed",
+      "job spec",
+      "role spec",
+    ]) ||
     containsAny(normalizedText, [
       "please carefully review the attached job spec",
       "confirm you are happy for me to represent you",
@@ -1586,7 +1725,8 @@ export function classifyEmail(email: RawEmail): Classification {
       taskType: null,
       deadline: null,
       confidence: 0.12,
-      summary: "Recruiter/job-spec email detected, but not a tracked application update.",
+      summary:
+        "Recruiter/job-spec email detected, but not a tracked application update.",
     };
   }
 
