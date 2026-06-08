@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requiredEnv, intEnv, floatEnv } from "@/lib/env";
 import { decryptText, encryptText } from "@/lib/security";
 import { classifyEmail } from "@/lib/classifier";
-import { saveCandidateAsApplication } from "@/lib/application-writer";
+import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
 import { addSyncLog } from "@/lib/sync-log";
 import type { User } from "@prisma/client";
 
@@ -68,7 +68,11 @@ export async function exchangeCodeForUser(code: string) {
     },
   });
 
-  await addSyncLog(user.id, "gmail_connected", "Gmail account connected or reconnected.");
+  await addSyncLog(
+    user.id,
+    "gmail_connected",
+    "Gmail account connected or reconnected.",
+  );
   return user;
 }
 
@@ -166,8 +170,12 @@ function extractBodyFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
     (mimeType.includes("text/plain") || mimeType.includes("text/html"))
   ) {
     const decoded = decodeBase64Url(payload.body.data);
-    const looksHtml = /<\s*html|<!doctype|<\s*body|<\s*div|<\s*p[\s>]/i.test(decoded);
-    return mimeType.includes("text/html") || looksHtml ? stripHtml(decoded) : decoded;
+    const looksHtml = /<\s*html|<!doctype|<\s*body|<\s*div|<\s*p[\s>]/i.test(
+      decoded,
+    );
+    return mimeType.includes("text/html") || looksHtml
+      ? stripHtml(decoded)
+      : decoded;
   }
 
   if (payload.parts?.length) {
@@ -260,13 +268,30 @@ export async function processGmailMessageForUser(
   });
 
   if (classification.confidence < 0.34) {
-    await addSyncLog(user.id, `${trigger}_message_skipped`, "Skipped low-confidence Gmail message.", {
-      messageId,
-      subject,
-      from,
-      confidence: classification.confidence,
-      summary: classification.summary,
-    });
+    await addSyncLog(
+      user.id,
+      `${trigger}_message_skipped`,
+      "Skipped low-confidence Gmail message.",
+      {
+        action: "skipped_low_confidence",
+        applicationDelta: 0,
+        taskDelta: 0,
+        matchedApplicationId: null,
+        createdApplicationId: null,
+        reason: "Classifier confidence was below 0.34.",
+        messageId,
+        subject,
+        from,
+        status: classification.status,
+        eventType: classification.eventType,
+        taskType: classification.taskType,
+        company: classification.company,
+        position: classification.position,
+        confidence: classification.confidence,
+        summary: classification.summary,
+      },
+    );
+
     return "skipped_low_confidence";
   }
 
@@ -302,38 +327,96 @@ export async function processGmailMessageForUser(
   });
 
   if (canAutoConfirm) {
-    const application = await saveCandidateAsApplication(candidate);
-    await addSyncLog(user.id, `${trigger}_message_saved`, "Gmail message auto-saved to tracker.", {
+    const saveResult = await saveCandidateAsApplicationWithAudit(candidate);
+
+    if (!saveResult.application) {
+      await addSyncLog(
+        user.id,
+        `${trigger}_message_review`,
+        "Gmail message was not allowed to create a new application, so it was sent to Review Inbox.",
+        {
+          action: saveResult.action,
+          applicationDelta: saveResult.applicationDelta,
+          taskDelta: saveResult.taskDelta,
+          matchedApplicationId: saveResult.matchedApplicationId,
+          createdApplicationId: saveResult.createdApplicationId,
+          reason: saveResult.reason,
+          messageId,
+          subject,
+          from,
+          status: classification.status,
+          eventType: classification.eventType,
+          taskType: classification.taskType,
+          company: classification.company,
+          position: classification.position,
+          confidence: classification.confidence,
+          summary: classification.summary,
+        },
+      );
+
+      return "pending_review";
+    }
+
+    const application = saveResult.application;
+
+    await addSyncLog(
+      user.id,
+      `${trigger}_message_saved`,
+      "Gmail message auto-saved to tracker.",
+      {
+        action: saveResult.action,
+        applicationDelta: saveResult.applicationDelta,
+        taskDelta: saveResult.taskDelta,
+        matchedApplicationId: saveResult.matchedApplicationId,
+        createdApplicationId: saveResult.createdApplicationId,
+        reason: saveResult.reason,
+        messageId,
+        subject,
+        from,
+        status: classification.status,
+        eventType: classification.eventType,
+        taskType: classification.taskType,
+        company: application.company,
+        position: application.position,
+        confidence: classification.confidence,
+      },
+    );
+
+    return "auto_confirmed";
+  }
+
+  await addSyncLog(
+    user.id,
+    `${trigger}_message_review`,
+    "Gmail message sent to Review Inbox.",
+    {
+      action: "sent_to_review_needs_manual_confirmation",
+      applicationDelta: 0,
+      taskDelta: 0,
+      matchedApplicationId: null,
+      createdApplicationId: null,
+      reason: "Email was job-related but was not safe enough to auto-save.",
       messageId,
       subject,
       from,
       status: classification.status,
       eventType: classification.eventType,
       taskType: classification.taskType,
-      company: application.company,
-      position: application.position,
+      company: classification.company,
+      position: classification.position,
       confidence: classification.confidence,
-    });
-    return "auto_confirmed";
-  }
-
-  await addSyncLog(user.id, `${trigger}_message_review`, "Gmail message sent to Review Inbox.", {
-    messageId,
-    subject,
-    from,
-    status: classification.status,
-    eventType: classification.eventType,
-    taskType: classification.taskType,
-    company: classification.company,
-    position: classification.position,
-    confidence: classification.confidence,
-    summary: classification.summary,
-  });
+      summary: classification.summary,
+    },
+  );
 
   return "pending_review";
 }
 
-export async function syncGmailForUser(user: User, scanDays: number, trigger = "manual_scan") {
+export async function syncGmailForUser(
+  user: User,
+  scanDays: number,
+  trigger = "manual_scan",
+) {
   const gmail = await getGmailClientForUser(user);
   const maxEmails = intEnv("MAX_EMAILS_PER_SCAN", 100);
   const queries = buildGmailSearchQueries(scanDays);
