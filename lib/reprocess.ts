@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { classifyEmail } from "@/lib/classifier";
 import { floatEnv } from "@/lib/env";
-import { saveCandidateAsApplication } from "@/lib/application-writer";
+import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
 
 function normalizeKey(value: string | null | undefined) {
   return (value ?? "")
@@ -12,7 +12,11 @@ function normalizeKey(value: string | null | undefined) {
     .trim();
 }
 
-function taskKey(company: string | null | undefined, position: string | null | undefined, type: string | null | undefined) {
+function taskKey(
+  company: string | null | undefined,
+  position: string | null | undefined,
+  type: string | null | undefined,
+) {
   return `${normalizeKey(company)}|${normalizeKey(position)}|${type ?? ""}`;
 }
 
@@ -33,12 +37,12 @@ export async function reprocessStoredEmailsForUser(userId: string) {
 
   const completedTasks = await prisma.task.findMany({
     where: { status: "DONE", application: { userId } },
-    include: { application: true }
+    include: { application: true },
   });
   const completedTaskKeys = new Set(
     completedTasks.map((task) =>
-      taskKey(task.application.company, task.application.position, task.type)
-    )
+      taskKey(task.application.company, task.application.position, task.type),
+    ),
   );
 
   const applicationIds = existingApplications.map(
@@ -136,8 +140,14 @@ export async function reprocessStoredEmailsForUser(userId: string) {
     });
 
     if (shouldConfirm) {
-      await saveCandidateAsApplication(updatedCandidate);
-      confirmed += 1;
+      const saveResult =
+        await saveCandidateAsApplicationWithAudit(updatedCandidate);
+
+      if (saveResult.application) {
+        confirmed += 1;
+      } else {
+        pending += 1;
+      }
     } else if (shouldIgnore) {
       ignored += 1;
     } else {
@@ -147,12 +157,19 @@ export async function reprocessStoredEmailsForUser(userId: string) {
 
   const recreatedOpenTasks = await prisma.task.findMany({
     where: { status: "TODO", application: { userId } },
-    include: { application: true }
+    include: { application: true },
   });
 
   for (const task of recreatedOpenTasks) {
-    if (completedTaskKeys.has(taskKey(task.application.company, task.application.position, task.type))) {
-      await prisma.task.update({ where: { id: task.id }, data: { status: "DONE" } });
+    if (
+      completedTaskKeys.has(
+        taskKey(task.application.company, task.application.position, task.type),
+      )
+    ) {
+      await prisma.task.update({
+        where: { id: task.id },
+        data: { status: "DONE" },
+      });
     }
   }
 
