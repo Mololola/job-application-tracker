@@ -144,6 +144,17 @@ const invalidCompanyPhrases = [
 // These are emails that are about jobs, but not about a job the user applied to.
 // They must not create applications or tasks.
 const nonApplicationPhrases = [
+  "job opportunity",
+  "job opportunity - from",
+  "oportunidad de empleo",
+  "oportunidad de empleo - de",
+  "ad response",
+  "repuesta a anuncio",
+  "re: ad response",
+  "ad response from",
+  "ad response de",
+  "suitable application for",
+  "application suitable for",
   "job alert",
   "job alerts",
   "alerta de empleo",
@@ -1276,6 +1287,10 @@ function isRecommendationOrAlert(
   );
   const obviousText = containsAny(normalizedText, nonApplicationPhrases);
   const obviousSubject = containsAny(subjectNormalized, [
+    "job opportunity",
+    "ad response",
+    "re: ad response",
+    "suitable application for",
     "job alert",
     "alerta de empleo",
     "our recommendation",
@@ -1389,6 +1404,12 @@ function classifyBySignals(
       summary:
         "Task completion confirmation detected. Existing matching tasks should be marked done.",
     };
+  }
+
+  // Job ads/recommendations must not become application confirmations just
+  // because the email also contains phrases like "application has been sent".
+  if (recommendationOrAlert) {
+    return null;
   }
 
   // Clear next-step/action emails should create tasks even if they also say "thanks for applying".

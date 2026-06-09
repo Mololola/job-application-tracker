@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { saveCandidateAsApplication } from "@/lib/application-writer";
+import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
 import type { ApplicationStatus, EventType, TaskType } from "@prisma/client";
 
 function normalize(value: FormDataEntryValue | null): string | null {
@@ -18,16 +18,27 @@ export async function confirmCandidateFromForm(formData: FormData) {
   const candidateId = normalize(formData.get("candidateId"));
   if (!candidateId) throw new Error("Missing candidateId");
 
-  const candidate = await prisma.emailCandidate.findUnique({ where: { id: candidateId } });
+  const candidate = await prisma.emailCandidate.findUnique({
+    where: { id: candidateId },
+  });
   if (!candidate) throw new Error("Candidate not found");
 
-  const company = normalize(formData.get("company")) ?? candidate.company ?? "Unknown company";
-  const position = normalize(formData.get("position")) ?? candidate.position ?? "Unknown position";
-  const status = (normalize(formData.get("status")) ?? candidate.status) as ApplicationStatus;
-  const eventType = (normalize(formData.get("eventType")) ?? candidate.eventType) as EventType;
+  const company =
+    normalize(formData.get("company")) ??
+    candidate.company ??
+    "Unknown company";
+  const position =
+    normalize(formData.get("position")) ??
+    candidate.position ??
+    "Unknown position";
+  const status = (normalize(formData.get("status")) ??
+    candidate.status) as ApplicationStatus;
+  const eventType = (normalize(formData.get("eventType")) ??
+    candidate.eventType) as EventType;
   const taskTypeRaw = normalize(formData.get("taskType")) ?? candidate.taskType;
   const taskType = taskTypeRaw ? (taskTypeRaw as TaskType) : null;
-  const deadline = normalizeDate(formData.get("deadline")) ?? candidate.deadline;
+  const deadline =
+    normalizeDate(formData.get("deadline")) ?? candidate.deadline;
 
   const updatedCandidate = await prisma.emailCandidate.update({
     where: { id: candidate.id },
@@ -37,9 +48,17 @@ export async function confirmCandidateFromForm(formData: FormData) {
       status,
       eventType,
       taskType,
-      deadline
-    }
+      deadline,
+    },
   });
 
-  return saveCandidateAsApplication(updatedCandidate);
+  const result = await saveCandidateAsApplicationWithAudit(updatedCandidate, {
+    allowCreateFromReview: true,
+  });
+
+  if (!result.application) {
+    throw new Error(result.reason);
+  }
+
+  return result.application;
 }

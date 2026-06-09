@@ -221,11 +221,35 @@ async function findApplicationBySimilarity(
 
   const companyNorm = normalize(company);
   const positionNorm = normalize(position);
-  const incomingIsFollowUp = candidate.eventType !== "APPLICATION_CONFIRMED";
+  const incomingIsApplicationConfirmation =
+    candidate.eventType === "APPLICATION_CONFIRMED";
+  const incomingIsFollowUp = !incomingIsApplicationConfirmation;
   const activeApplications = applications.filter(
     (app) => !["REJECTED", "WITHDRAWN"].includes(app.status),
   );
   const pool = incomingIsFollowUp ? activeApplications : applications;
+
+  // Application confirmations must be matched very strictly.
+  // Do not group separate "application has been sent" emails just because
+  // Gmail threaded them together, the company is Unknown/Broadbean/Totaljobs,
+  // or the roles look vaguely similar.
+  if (incomingIsApplicationConfirmation) {
+    if (
+      !isUnknown(company) &&
+      !isLowQualityCompany(company) &&
+      !isUnknown(position)
+    ) {
+      const exactDuplicate = activeApplications.find(
+        (app) =>
+          normalize(app.company) === companyNorm &&
+          normalize(app.position) === positionNorm,
+      );
+
+      if (exactDuplicate) return exactDuplicate;
+    }
+
+    return null;
+  }
 
   // 1) Exact normalized company + position match.
   let match = pool.find(
@@ -298,8 +322,13 @@ async function findApplicationBySimilarity(
 
 export type SaveCandidateAction =
   | "created_new_application"
+  | "created_new_application_manual_review"
   | "updated_existing_application"
   | "sent_to_review_unmatched_update";
+
+export type SaveCandidateOptions = {
+  allowCreateFromReview?: boolean;
+};
 
 export type SaveCandidateResult = {
   application: Application | null;
@@ -313,11 +342,17 @@ export type SaveCandidateResult = {
 
 export async function saveCandidateAsApplicationWithAudit(
   candidate: EmailCandidate,
+  options: SaveCandidateOptions = {},
 ): Promise<SaveCandidateResult> {
+  const allowCreateFromReview = options.allowCreateFromReview === true;
+
   const incomingCompany = clean(candidate.company, "Unknown company");
   const incomingPosition = clean(candidate.position, "Unknown position");
 
-  const threadMatch = await findApplicationByThread(candidate);
+  const threadMatch =
+    candidate.eventType === "APPLICATION_CONFIRMED"
+      ? null
+      : await findApplicationByThread(candidate);
   const similarityMatch =
     threadMatch ??
     (await findApplicationBySimilarity(
@@ -337,7 +372,11 @@ export async function saveCandidateAsApplicationWithAudit(
 
   const taskCompletion = isTaskCompletionCandidate(candidate);
 
-  if (!similarityMatch && !canCreateNewApplication(candidate.eventType)) {
+  if (
+    !similarityMatch &&
+    !allowCreateFromReview &&
+    !canCreateNewApplication(candidate.eventType)
+  ) {
     const reason = getUnmatchedUpdateReviewReason(candidate.eventType);
 
     await prisma.emailCandidate.update({
@@ -428,7 +467,17 @@ export async function saveCandidateAsApplicationWithAudit(
     },
   });
 
-  if (!existingEvent) {
+  const existingApplicationConfirmationEvent =
+    candidate.eventType === "APPLICATION_CONFIRMED"
+      ? await prisma.applicationEvent.findFirst({
+          where: {
+            applicationId: application.id,
+            type: "APPLICATION_CONFIRMED",
+          },
+        })
+      : null;
+
+  if (!existingEvent && !existingApplicationConfirmationEvent) {
     await prisma.applicationEvent.create({
       data: {
         applicationId: application.id,
@@ -496,14 +545,18 @@ export async function saveCandidateAsApplicationWithAudit(
   const result: SaveCandidateResult = {
     application,
     action: createdNewApplication
-      ? "created_new_application"
+      ? allowCreateFromReview && !canCreateNewApplication(candidate.eventType)
+        ? "created_new_application_manual_review"
+        : "created_new_application"
       : "updated_existing_application",
     applicationDelta: createdNewApplication ? 1 : 0,
     taskDelta,
     matchedApplicationId: similarityMatch?.id ?? null,
     createdApplicationId: createdNewApplication ? application.id : null,
     reason: createdNewApplication
-      ? "Email was classified as APPLICATION_CONFIRMED, so it was allowed to create a new application."
+      ? allowCreateFromReview && !canCreateNewApplication(candidate.eventType)
+        ? "User manually confirmed this Review Inbox item, so it was allowed to create a new application."
+        : "Email was classified as APPLICATION_CONFIRMED, so it was allowed to create a new application."
       : "Email matched an existing application.",
   };
 
