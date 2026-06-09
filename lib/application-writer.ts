@@ -78,6 +78,7 @@ function isLowQualityCompany(value: string | null | undefined) {
       "efinancialcareers",
       "workday",
       "micro1",
+      "broadbean",
       "jobs",
       "careers",
     ].includes(normalized)
@@ -230,22 +231,32 @@ async function findApplicationBySimilarity(
   const pool = incomingIsFollowUp ? activeApplications : applications;
 
   // Application confirmations must be matched very strictly.
-  // Do not group separate "application has been sent" emails just because
-  // Gmail threaded them together, the company is Unknown/Broadbean/Totaljobs,
-  // or the roles look vaguely similar.
+  // They should only match an existing application when they look like the same exact job.
+  // Do not use fuzzy matching for APPLICATION_CONFIRMED because that causes separate
+  // Totaljobs/Broadbean confirmations to stack under one application.
   if (incomingIsApplicationConfirmation) {
-    if (
-      !isUnknown(company) &&
-      !isLowQualityCompany(company) &&
-      !isUnknown(position)
-    ) {
-      const exactDuplicate = activeApplications.find(
-        (app) =>
-          normalize(app.company) === companyNorm &&
-          normalize(app.position) === positionNorm,
+    if (!isUnknown(position)) {
+      const exactRoleMatches = activeApplications.filter(
+        (app) => normalize(app.position) === positionNorm,
       );
 
-      if (exactDuplicate) return exactDuplicate;
+      const exactCompanyAndRoleMatch = exactRoleMatches.find(
+        (app) =>
+          !isLowQualityCompany(company) &&
+          !isLowQualityCompany(app.company) &&
+          normalize(app.company) === companyNorm,
+      );
+
+      if (exactCompanyAndRoleMatch) return exactCompanyAndRoleMatch;
+
+      const lowQualityCompanyRoleMatches = exactRoleMatches.filter(
+        (app) =>
+          isLowQualityCompany(company) && isLowQualityCompany(app.company),
+      );
+
+      if (lowQualityCompanyRoleMatches.length === 1) {
+        return lowQualityCompanyRoleMatches[0];
+      }
     }
 
     return null;

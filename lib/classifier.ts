@@ -558,7 +558,6 @@ const applicationUpdatePhrases = [
   "application update",
   "next steps on your application",
   "next step on your application",
-  "your application for",
   "your application has been viewed",
   "your application has been read",
   "your application is in review",
@@ -704,6 +703,58 @@ function containsAny(text: string, phrases: string[]): boolean {
 
 function countHits(text: string, phrases: string[]) {
   return phrases.filter((phrase) => containsPhrase(text, phrase)).length;
+}
+
+function hasApplicationConfirmationSignal(normalizedText: string): boolean {
+  if (containsAny(normalizedText, applicationConfirmationPhrases)) return true;
+
+  return (
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been received\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was received\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour recent job application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bwe received your application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bwe have received your application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bapplication for [a-z0-9@._+\-'\s]{2,160} has been sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\bapplication for [a-z0-9@._+\-'\s]{2,160} was submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\btu solicitud para [a-z0-9@._+\-'\s]{2,160} ha sido enviada\b/i.test(
+      normalizedText,
+    ) ||
+    /\btu candidatura para [a-z0-9@._+\-'\s]{2,160} ha sido enviada\b/i.test(
+      normalizedText,
+    ) ||
+    /\bse ha enviado tu solicitud para [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bse ha enviado tu candidatura para [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    )
+  );
 }
 
 function titleCase(value: string): string {
@@ -1288,8 +1339,9 @@ function isRecommendationOrAlert(
   const obviousText = containsAny(normalizedText, nonApplicationPhrases);
   const obviousSubject = containsAny(subjectNormalized, [
     "job opportunity",
+    "job opportunity from",
     "ad response",
-    "re: ad response",
+    "re ad response",
     "suitable application for",
     "job alert",
     "alerta de empleo",
@@ -1356,10 +1408,8 @@ function classifyBySignals(
 ): MatchResult | null {
   const isRejection = hasStrongRejection(normalizedText);
   const isOffer = containsAny(normalizedText, offerPhrases);
-  const isApplicationConfirmation = containsAny(
-    normalizedText,
-    applicationConfirmationPhrases,
-  );
+  const isApplicationConfirmation =
+    hasApplicationConfirmationSignal(normalizedText);
   const isViewedOrRead = containsAny(normalizedText, viewedOrReadPhrases);
   const isApplicationUpdate = containsAny(
     normalizedText,
