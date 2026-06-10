@@ -51,9 +51,11 @@ export async function confirmCandidateFromForm(formData: FormData) {
       deadline,
     },
   });
+  const forceApplicationId = normalize(formData.get("applicationId"));
 
   const result = await saveCandidateAsApplicationWithAudit(updatedCandidate, {
     allowCreateFromReview: true,
+    forceApplicationId,
   });
 
   if (!result.application) {

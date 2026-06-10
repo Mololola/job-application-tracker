@@ -21,6 +21,7 @@ const AUTO_SAVE_EVENT_TYPES = new Set([
   "APPLICATION_CONFIRMED",
   "FOLLOW_UP",
   "APPLICATION_VIEWED",
+  "GENERAL_UPDATE",
   "REJECTION_RECEIVED",
   "INTERVIEW_INVITE",
   "ASSESSMENT_RECEIVED",
@@ -108,12 +109,35 @@ export function shouldTryAutoSaveClassification(
   threshold = 0.72,
 ) {
   if (shouldAutoIgnoreClassification(classification)) return false;
-  if (!hasEnoughIdentityForAutomation(classification)) return false;
-  if (!AUTO_SAVE_EVENT_TYPES.has(classification.eventType)) return false;
 
-  if (classification.eventType === "APPLICATION_CONFIRMED") {
-    return classification.confidence >= Math.min(0.68, threshold);
+  const eventType = classification.eventType;
+
+  if (
+    !AUTO_SAVE_EVENT_TYPES.has(eventType) &&
+    !mustMatchExistingApplication(eventType)
+  ) {
+    return false;
   }
 
-  return classification.confidence >= threshold;
+  // Application confirmations are allowed to create new applications, so they
+  // still need at least some identity before automation.
+  if (eventType === "APPLICATION_CONFIRMED") {
+    return (
+      hasEnoughIdentityForAutomation(classification) &&
+      classification.confidence >= Math.min(0.68, threshold)
+    );
+  }
+
+  // Existing-application updates are safe to try even without company/position,
+  // because application-writer.ts will not create a new application for them.
+  // This allows same-thread rejections/interviews/tasks to auto-link instead of
+  // going straight to Review Inbox.
+  if (mustMatchExistingApplication(eventType)) {
+    return classification.confidence >= threshold;
+  }
+
+  return (
+    hasEnoughIdentityForAutomation(classification) &&
+    classification.confidence >= threshold
+  );
 }

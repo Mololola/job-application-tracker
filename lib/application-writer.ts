@@ -210,6 +210,80 @@ async function findApplicationByThread(candidate: EmailCandidate) {
   return previousCandidate?.application ?? null;
 }
 
+function normalizeEmailAddress(value: string | null | undefined) {
+  const match = (value ?? "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match?.[0]?.toLowerCase() ?? null;
+}
+
+function senderDomain(value: string | null | undefined) {
+  const email = normalizeEmailAddress(value);
+  if (!email) return null;
+
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (!domain) return null;
+
+  return domain.replace(/^mail\./, "").replace(/^email\./, "");
+}
+
+function isGenericSenderDomain(domain: string | null) {
+  if (!domain) return true;
+
+  return [
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "icloud.com",
+    "yahoo.com",
+    "linkedin.com",
+    "indeed.com",
+    "totaljobs.com",
+    "glassdoor.com",
+    "reed.co.uk",
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "workday.com",
+    "myworkdayjobs.com",
+    "smartrecruiters.com",
+    "broadbean.com",
+  ].some((generic) => domain === generic || domain.endsWith(`.${generic}`));
+}
+
+function textIncludesNormalized(
+  haystack: string,
+  needle: string | null | undefined,
+) {
+  const normalizedNeedle = normalize(needle);
+  if (!normalizedNeedle || normalizedNeedle.length < 4) return false;
+  return normalize(haystack).includes(normalizedNeedle);
+}
+
+function evidenceTextForCandidate(candidate: EmailCandidate) {
+  return [
+    candidate.emailSubject,
+    candidate.emailFrom,
+    candidate.snippet,
+    candidate.bodyPreview,
+    candidate.company,
+    candidate.position,
+    candidate.summary,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+type MatchScore = {
+  application: Application;
+  score: number;
+  reasons: string[];
+};
+
+function addScore(match: MatchScore, points: number, reason: string) {
+  match.score += points;
+  match.reasons.push(reason);
+}
+
 async function findApplicationBySimilarity(
   candidate: EmailCandidate,
   company: string,
@@ -262,70 +336,257 @@ async function findApplicationBySimilarity(
     return null;
   }
 
-  // 1) Exact normalized company + position match.
-  let match = pool.find(
-    (app) =>
-      normalize(app.company) === companyNorm &&
-      normalize(app.position) === positionNorm,
-  );
-  if (match) return match;
+  const applicationIds = pool.map((application) => application.id);
 
-  // 2) Same company and similar role text.
-  match = pool.find(
-    (app) =>
-      normalize(app.company) === companyNorm &&
-      similarity(app.position, position) >= 0.55,
-  );
-  if (match) return match;
+  const previousCandidates =
+    applicationIds.length > 0
+      ? await prisma.emailCandidate.findMany({
+          where: {
+            userId: candidate.userId,
+            applicationId: { in: applicationIds },
+            id: { not: candidate.id },
+          },
+          orderBy: [{ emailDate: "desc" }, { createdAt: "desc" }],
+          take: 500,
+        })
+      : [];
 
-  // 3) Existing app had an unknown/bad company, but the role matches. This fixes
-  // job-board flows where the confirmation only says the role, then a later email
-  // reveals the employer.
-  if (!isUnknown(position)) {
-    match = pool.find(
-      (app) =>
-        isLowQualityCompany(app.company) &&
-        similarity(app.position, position) >= 0.55,
-    );
-    if (match) return match;
+  const previousEvents =
+    applicationIds.length > 0
+      ? await prisma.applicationEvent.findMany({
+          where: {
+            applicationId: { in: applicationIds },
+          },
+          orderBy: [{ emailDate: "desc" }, { createdAt: "desc" }],
+          take: 500,
+        })
+      : [];
+
+  const candidatesByApplication = new Map<string, EmailCandidate[]>();
+  for (const previousCandidate of previousCandidates) {
+    if (!previousCandidate.applicationId) continue;
+
+    const existing =
+      candidatesByApplication.get(previousCandidate.applicationId) ?? [];
+    existing.push(previousCandidate);
+    candidatesByApplication.set(previousCandidate.applicationId, existing);
   }
 
-  // 4) Existing app had an unknown/bad role, but the company matches.
-  if (!isUnknown(company)) {
-    match = pool.find(
-      (app) =>
-        normalize(app.company) === companyNorm &&
-        isLowQualityPosition(app.position),
-    );
-    if (match) return match;
+  const eventsByApplication = new Map<string, typeof previousEvents>();
+  for (const previousEvent of previousEvents) {
+    const existing = eventsByApplication.get(previousEvent.applicationId) ?? [];
+    existing.push(previousEvent);
+    eventsByApplication.set(previousEvent.applicationId, existing);
   }
 
-  // 5) For follow-ups, use a stricter one-and-only role match even when the company
-  // differs. This catches LinkedIn/recruiter follow-ups that use a recruiter sender
-  // but mention the same role.
-  if (incomingIsFollowUp && !isUnknown(position)) {
-    const roleMatches = pool.filter(
-      (app) => similarity(app.position, position) >= 0.68,
-    );
-    if (roleMatches.length === 1) return roleMatches[0];
-  }
+  const incomingText = evidenceTextForCandidate(candidate);
+  const incomingDomain = senderDomain(candidate.emailFrom);
 
-  // 6) If the incoming email only has company, only link automatically when there
-  // is exactly one existing application for that company.
-  if (isUnknown(position)) {
-    const companyMatches = pool.filter(
-      (app) => normalize(app.company) === companyNorm,
-    );
-    if (companyMatches.length === 1) return companyMatches[0];
-  }
+  const scored: MatchScore[] = pool.map((application) => {
+    const match: MatchScore = {
+      application,
+      score: 0,
+      reasons: [],
+    };
 
-  // 7) If the incoming email only has position, only link automatically when there
-  // is exactly one strong role match. This helps LinkedIn/job board follow-ups.
-  if (isUnknown(company)) {
-    const roleMatches = pool.filter(
-      (app) => similarity(app.position, position) >= 0.75,
-    );
-    if (roleMatches.length === 1) return roleMatches[0];
+    const appCompanyNorm = normalize(application.company);
+    const appPositionNorm = normalize(application.position);
+    const previousForApp = candidatesByApplication.get(application.id) ?? [];
+    const eventsForApp = eventsByApplication.get(application.id) ?? [];
+
+    const companyExact =
+      !isUnknown(company) &&
+      !isLowQualityCompany(company) &&
+      !isLowQualityCompany(application.company) &&
+      appCompanyNorm === companyNorm;
+
+    const positionExact =
+      !isUnknown(position) &&
+      !isLowQualityPosition(position) &&
+      !isLowQualityPosition(application.position) &&
+      appPositionNorm === positionNorm;
+
+    const positionSimilarity = similarity(application.position, position);
+    const companySimilarity = similarity(application.company, company);
+
+    if (companyExact && positionExact) {
+      addScore(match, 100, "exact company and exact role");
+    }
+
+    if (companyExact && positionSimilarity >= 0.55) {
+      addScore(match, 82, "exact company and similar role");
+    }
+
+    if (positionExact && companySimilarity >= 0.5) {
+      addScore(match, 78, "exact role and similar company");
+    }
+
+    if (
+      !isUnknown(position) &&
+      isLowQualityCompany(application.company) &&
+      positionSimilarity >= 0.68
+    ) {
+      addScore(
+        match,
+        72,
+        "existing application has low-quality company and role matches",
+      );
+    }
+
+    if (
+      !isUnknown(company) &&
+      isLowQualityPosition(application.position) &&
+      companyExact
+    ) {
+      addScore(
+        match,
+        70,
+        "existing application has low-quality role and company matches",
+      );
+    }
+
+    if (
+      !isUnknown(company) &&
+      textIncludesNormalized(incomingText, application.company) &&
+      positionSimilarity >= 0.55
+    ) {
+      addScore(
+        match,
+        74,
+        "incoming email text mentions application company and role is similar",
+      );
+    }
+
+    if (
+      !isUnknown(position) &&
+      textIncludesNormalized(incomingText, application.position)
+    ) {
+      addScore(match, 58, "incoming email text mentions application role");
+    }
+
+    for (const previousCandidate of previousForApp) {
+      const previousText = evidenceTextForCandidate(previousCandidate);
+      const previousDomain = senderDomain(previousCandidate.emailFrom);
+
+      if (
+        candidate.emailThreadId &&
+        previousCandidate.emailThreadId &&
+        candidate.emailThreadId === previousCandidate.emailThreadId
+      ) {
+        addScore(match, 95, "same Gmail thread as previous linked candidate");
+      }
+
+      if (
+        incomingDomain &&
+        previousDomain &&
+        incomingDomain === previousDomain &&
+        !isGenericSenderDomain(incomingDomain)
+      ) {
+        addScore(
+          match,
+          35,
+          "same useful sender domain as previous linked candidate",
+        );
+      }
+
+      if (
+        !isUnknown(position) &&
+        previousCandidate.position &&
+        similarity(previousCandidate.position, position) >= 0.72
+      ) {
+        addScore(match, 55, "role similar to previous linked candidate");
+      }
+
+      if (
+        !isUnknown(company) &&
+        previousCandidate.company &&
+        !isLowQualityCompany(previousCandidate.company) &&
+        similarity(previousCandidate.company, company) >= 0.72
+      ) {
+        addScore(match, 55, "company similar to previous linked candidate");
+      }
+
+      if (
+        !isUnknown(position) &&
+        textIncludesNormalized(previousText, position)
+      ) {
+        addScore(
+          match,
+          35,
+          "previous linked email text contains incoming role",
+        );
+      }
+
+      if (
+        !isUnknown(company) &&
+        textIncludesNormalized(previousText, company)
+      ) {
+        addScore(
+          match,
+          35,
+          "previous linked email text contains incoming company",
+        );
+      }
+    }
+
+    for (const previousEvent of eventsForApp) {
+      const previousEventText = [
+        previousEvent.emailSubject,
+        previousEvent.emailFrom,
+        previousEvent.summary,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      if (
+        !isUnknown(position) &&
+        textIncludesNormalized(previousEventText, position)
+      ) {
+        addScore(match, 25, "previous timeline event contains incoming role");
+      }
+
+      if (
+        !isUnknown(company) &&
+        textIncludesNormalized(previousEventText, company)
+      ) {
+        addScore(
+          match,
+          25,
+          "previous timeline event contains incoming company",
+        );
+      }
+    }
+
+    return match;
+  });
+
+  const sorted = scored
+    .filter((match) => match.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const best = sorted[0];
+  const second = sorted[1];
+
+  if (!best) return null;
+
+  const minimumScore =
+    candidate.eventType === "REJECTION_RECEIVED" ||
+    candidate.eventType === "INTERVIEW_INVITE" ||
+    candidate.eventType === "AI_INTERVIEW_INVITE" ||
+    candidate.eventType === "CODING_TEST_RECEIVED" ||
+    candidate.eventType === "ASSESSMENT_RECEIVED"
+      ? 72
+      : 76;
+
+  const secondScore = second?.score ?? 0;
+  const scoreGap = best.score - secondScore;
+
+  // Accept very strong matches immediately.
+  // Otherwise require the best match to clearly beat the second-best match.
+  if (best.score >= 95) return best.application;
+
+  if (best.score >= minimumScore && scoreGap >= 10) {
+    return best.application;
   }
 
   return null;
@@ -339,6 +600,7 @@ export type SaveCandidateAction =
 
 export type SaveCandidateOptions = {
   allowCreateFromReview?: boolean;
+  forceApplicationId?: string | null;
 };
 
 export type SaveCandidateResult = {
@@ -356,6 +618,14 @@ export async function saveCandidateAsApplicationWithAudit(
   options: SaveCandidateOptions = {},
 ): Promise<SaveCandidateResult> {
   const allowCreateFromReview = options.allowCreateFromReview === true;
+  const forcedApplication = options.forceApplicationId
+    ? await prisma.application.findFirst({
+        where: {
+          id: options.forceApplicationId,
+          userId: candidate.userId,
+        },
+      })
+    : null;
 
   const incomingCompany = clean(candidate.company, "Unknown company");
   const incomingPosition = clean(candidate.position, "Unknown position");
@@ -365,6 +635,7 @@ export async function saveCandidateAsApplicationWithAudit(
       ? null
       : await findApplicationByThread(candidate);
   const similarityMatch =
+    forcedApplication ??
     threadMatch ??
     (await findApplicationBySimilarity(
       candidate,
