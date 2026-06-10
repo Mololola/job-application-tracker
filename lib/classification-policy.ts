@@ -1,8 +1,24 @@
+import type { Classification } from "@/lib/classifier";
+
 export const CREATE_NEW_APPLICATION_EVENT_TYPES = new Set([
   "APPLICATION_CONFIRMED",
 ]);
 
 export const EXISTING_APPLICATION_EVENT_TYPES = new Set([
+  "FOLLOW_UP",
+  "APPLICATION_VIEWED",
+  "GENERAL_UPDATE",
+  "REJECTION_RECEIVED",
+  "INTERVIEW_INVITE",
+  "ASSESSMENT_RECEIVED",
+  "CODING_TEST_RECEIVED",
+  "AI_INTERVIEW_INVITE",
+  "OFFER_RECEIVED",
+  "TASK_COMPLETED",
+]);
+
+const AUTO_SAVE_EVENT_TYPES = new Set([
+  "APPLICATION_CONFIRMED",
   "FOLLOW_UP",
   "APPLICATION_VIEWED",
   "GENERAL_UPDATE",
@@ -54,4 +70,74 @@ export function getUnmatchedUpdateReviewReason(
     default:
       return "Job-related email could not be matched to an existing application.";
   }
+}
+
+export function hasEnoughIdentityForAutomation(classification: Classification) {
+  return Boolean(classification.company || classification.position);
+}
+
+export function shouldAutoIgnoreClassification(classification: Classification) {
+  const summary = classification.summary.toLowerCase();
+
+  if (classification.confidence < 0.34) return true;
+
+  if (
+    summary.includes("job alert") ||
+    summary.includes("job recommendation") ||
+    summary.includes("recommendation detected") ||
+    summary.includes("not an application update") ||
+    summary.includes("not a tracked application update")
+  ) {
+    return true;
+  }
+
+  if (
+    classification.status === "UNKNOWN" &&
+    classification.eventType === "GENERAL_UPDATE" &&
+    !classification.company &&
+    !classification.position &&
+    classification.confidence < 0.55
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function shouldTryAutoSaveClassification(
+  classification: Classification,
+  threshold = 0.72,
+) {
+  if (shouldAutoIgnoreClassification(classification)) return false;
+
+  const eventType = classification.eventType;
+
+  if (
+    !AUTO_SAVE_EVENT_TYPES.has(eventType) &&
+    !mustMatchExistingApplication(eventType)
+  ) {
+    return false;
+  }
+
+  // Application confirmations are allowed to create new applications, so they
+  // still need at least some identity before automation.
+  if (eventType === "APPLICATION_CONFIRMED") {
+    return (
+      hasEnoughIdentityForAutomation(classification) &&
+      classification.confidence >= Math.min(0.68, threshold)
+    );
+  }
+
+  // Existing-application updates are safe to try even without company/position,
+  // because application-writer.ts will not create a new application for them.
+  // This allows same-thread rejections/interviews/tasks to auto-link instead of
+  // going straight to Review Inbox.
+  if (mustMatchExistingApplication(eventType)) {
+    return classification.confidence >= threshold;
+  }
+
+  return (
+    hasEnoughIdentityForAutomation(classification) &&
+    classification.confidence >= threshold
+  );
 }

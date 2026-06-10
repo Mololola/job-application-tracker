@@ -144,6 +144,17 @@ const invalidCompanyPhrases = [
 // These are emails that are about jobs, but not about a job the user applied to.
 // They must not create applications or tasks.
 const nonApplicationPhrases = [
+  "job opportunity",
+  "job opportunity - from",
+  "oportunidad de empleo",
+  "oportunidad de empleo - de",
+  "ad response",
+  "repuesta a anuncio",
+  "re: ad response",
+  "ad response from",
+  "ad response de",
+  "suitable application for",
+  "application suitable for",
   "job alert",
   "job alerts",
   "alerta de empleo",
@@ -547,7 +558,6 @@ const applicationUpdatePhrases = [
   "application update",
   "next steps on your application",
   "next step on your application",
-  "your application for",
   "your application has been viewed",
   "your application has been read",
   "your application is in review",
@@ -693,6 +703,58 @@ function containsAny(text: string, phrases: string[]): boolean {
 
 function countHits(text: string, phrases: string[]) {
   return phrases.filter((phrase) => containsPhrase(text, phrase)).length;
+}
+
+function hasApplicationConfirmationSignal(normalizedText: string): boolean {
+  if (containsAny(normalizedText, applicationConfirmationPhrases)) return true;
+
+  return (
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} has been received\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour application for [a-z0-9@._+\-'\s]{2,160} was received\b/i.test(
+      normalizedText,
+    ) ||
+    /\byour recent job application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bwe received your application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bwe have received your application for [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bapplication for [a-z0-9@._+\-'\s]{2,160} has been sent\b/i.test(
+      normalizedText,
+    ) ||
+    /\bapplication for [a-z0-9@._+\-'\s]{2,160} was submitted\b/i.test(
+      normalizedText,
+    ) ||
+    /\btu solicitud para [a-z0-9@._+\-'\s]{2,160} ha sido enviada\b/i.test(
+      normalizedText,
+    ) ||
+    /\btu candidatura para [a-z0-9@._+\-'\s]{2,160} ha sido enviada\b/i.test(
+      normalizedText,
+    ) ||
+    /\bse ha enviado tu solicitud para [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    ) ||
+    /\bse ha enviado tu candidatura para [a-z0-9@._+\-'\s]{2,160}\b/i.test(
+      normalizedText,
+    )
+  );
 }
 
 function titleCase(value: string): string {
@@ -1276,6 +1338,11 @@ function isRecommendationOrAlert(
   );
   const obviousText = containsAny(normalizedText, nonApplicationPhrases);
   const obviousSubject = containsAny(subjectNormalized, [
+    "job opportunity",
+    "job opportunity from",
+    "ad response",
+    "re ad response",
+    "suitable application for",
     "job alert",
     "alerta de empleo",
     "our recommendation",
@@ -1341,10 +1408,8 @@ function classifyBySignals(
 ): MatchResult | null {
   const isRejection = hasStrongRejection(normalizedText);
   const isOffer = containsAny(normalizedText, offerPhrases);
-  const isApplicationConfirmation = containsAny(
-    normalizedText,
-    applicationConfirmationPhrases,
-  );
+  const isApplicationConfirmation =
+    hasApplicationConfirmationSignal(normalizedText);
   const isViewedOrRead = containsAny(normalizedText, viewedOrReadPhrases);
   const isApplicationUpdate = containsAny(
     normalizedText,
@@ -1389,6 +1454,12 @@ function classifyBySignals(
       summary:
         "Task completion confirmation detected. Existing matching tasks should be marked done.",
     };
+  }
+
+  // Job ads/recommendations must not become application confirmations just
+  // because the email also contains phrases like "application has been sent".
+  if (recommendationOrAlert) {
+    return null;
   }
 
   // Clear next-step/action emails should create tasks even if they also say "thanks for applying".

@@ -2,6 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { classifyEmail } from "@/lib/classifier";
 import { floatEnv } from "@/lib/env";
 import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
+import {
+  shouldAutoIgnoreClassification,
+  shouldTryAutoSaveClassification,
+} from "@/lib/classification-policy";
 
 function normalizeKey(value: string | null | undefined) {
   return (value ?? "")
@@ -103,19 +107,12 @@ export async function reprocessStoredEmailsForUser(userId: string) {
       continue;
     }
 
-    const shouldIgnore =
-      classification.confidence < 0.34 ||
-      classification.summary.toLowerCase().includes("job alert") ||
-      classification.summary.toLowerCase().includes("recommendation detected");
+    const shouldIgnore = shouldAutoIgnoreClassification(classification);
 
-    const hasEnoughIdentity = Boolean(
-      classification.company || classification.position,
+    const shouldConfirm = shouldTryAutoSaveClassification(
+      classification,
+      threshold,
     );
-    const shouldConfirm =
-      !shouldIgnore &&
-      classification.status !== "UNKNOWN" &&
-      classification.confidence >= threshold &&
-      hasEnoughIdentity;
 
     const reviewStatus = shouldIgnore
       ? "IGNORED"

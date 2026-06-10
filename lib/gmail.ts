@@ -6,6 +6,10 @@ import { classifyEmail } from "@/lib/classifier";
 import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
 import { addSyncLog } from "@/lib/sync-log";
 import type { User } from "@prisma/client";
+import {
+  shouldAutoIgnoreClassification,
+  shouldTryAutoSaveClassification,
+} from "@/lib/classification-policy";
 
 const GMAIL_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
@@ -267,18 +271,17 @@ export async function processGmailMessageForUser(
     date: emailDate,
   });
 
-  if (classification.confidence < 0.34) {
+  const shouldAutoIgnore = shouldAutoIgnoreClassification(classification);
+
+  if (shouldAutoIgnore) {
     await addSyncLog(
       user.id,
       `${trigger}_message_skipped`,
-      "Skipped low-confidence Gmail message.",
+      "Skipped Gmail message because it was low-confidence or clearly not a tracked application update.",
       {
-        action: "skipped_low_confidence",
+        action: "skipped_not_relevant",
         applicationDelta: 0,
         taskDelta: 0,
-        matchedApplicationId: null,
-        createdApplicationId: null,
-        reason: "Classifier confidence was below 0.34.",
         messageId,
         subject,
         from,
@@ -295,13 +298,10 @@ export async function processGmailMessageForUser(
     return "skipped_low_confidence";
   }
 
-  const hasEnoughIdentity = Boolean(
-    classification.company || classification.position,
+  const canAutoConfirm = shouldTryAutoSaveClassification(
+    classification,
+    autoConfirmThreshold,
   );
-  const canAutoConfirm =
-    classification.status !== "UNKNOWN" &&
-    classification.confidence >= autoConfirmThreshold &&
-    hasEnoughIdentity;
 
   const candidate = await prisma.emailCandidate.create({
     data: {
@@ -333,7 +333,7 @@ export async function processGmailMessageForUser(
       await addSyncLog(
         user.id,
         `${trigger}_message_review`,
-        "Gmail message was not allowed to create a new application, so it was sent to Review Inbox.",
+        "Gmail message was high confidence, but it could not be matched safely, so it was sent to Review Inbox.",
         {
           action: saveResult.action,
           applicationDelta: saveResult.applicationDelta,
@@ -384,7 +384,6 @@ export async function processGmailMessageForUser(
 
     return "auto_confirmed";
   }
-
   await addSyncLog(
     user.id,
     `${trigger}_message_review`,
