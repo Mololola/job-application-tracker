@@ -1003,7 +1003,7 @@ function looksLikeRoleCandidate(value: string | null | undefined): boolean {
     )
   )
     return false;
-  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|disenador|diseñador|analista|datos|producto)\b/i.test(
+  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|architect|specialist|consultant|coordinator|administrator|owner|executive|scientist|technician|lead|principal|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|arquitecto|consultor|especialista|tecnico|coordinador|administrador|disenador|diseñador|analista|datos|producto)\b/i.test(
     normalized,
   );
 }
@@ -1268,7 +1268,7 @@ function extractPosition(
     const value = cleanupPosition(
       (combined.match(pattern) ?? compact.match(pattern))?.[1] ?? "",
     );
-    if (value) return value;
+    if (value && looksLikeRoleCandidate(value)) return value;
   }
 
   return null;
@@ -1932,7 +1932,15 @@ function classifyEmailInner(email: RawEmail): Classification {
   }
 
   const company = extractCompany(textWithNewlines, email.from, subject);
-  const position = extractPosition(textWithNewlines, subject);
+  const rawPosition = extractPosition(textWithNewlines, subject);
+  // If the extracted "position" is identical to the company, it's a mis-capture
+  // of the company name, not a real role — drop it.
+  const position =
+    rawPosition &&
+    company &&
+    normalizeForMatching(rawPosition) === normalizeForMatching(company)
+      ? null
+      : rawPosition;
   const deadline = extractDeadline(textWithNewlines);
 
   if (signal) {
