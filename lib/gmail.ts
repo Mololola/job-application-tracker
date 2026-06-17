@@ -261,6 +261,17 @@ export async function processGmailMessageForUser(
   const message = await getMessage(gmail, messageId);
   const subject = headerValue(message, "Subject");
   const from = headerValue(message, "From");
+  // Emails the user sent themselves (replies in private threads, self-CCs) are
+  // not job-application updates. Skip them before any classification.
+  if (from && from.toLowerCase().includes(user.email.toLowerCase())) {
+    await addSyncLog(
+      user.id,
+      `${trigger}_message_self_sent`,
+      "Skipped Gmail message because it was sent by the user, not an application update.",
+      { messageId, subject, from },
+    );
+    return "skipped_low_confidence";
+  }
   const dateHeader = headerValue(message, "Date");
   const emailDate = dateHeader ? new Date(dateHeader) : null;
   const rawBody = extractBodyFromPayload(message.payload ?? undefined);
