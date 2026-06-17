@@ -56,6 +56,7 @@ export async function confirmCandidateFromForm(formData: FormData) {
   const result = await saveCandidateAsApplicationWithAudit(updatedCandidate, {
     allowCreateFromReview: true,
     forceApplicationId,
+    trigger: "manual_review",
   });
 
   if (!result.application) {

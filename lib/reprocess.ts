@@ -6,6 +6,10 @@ import {
   shouldAutoIgnoreClassification,
   shouldTryAutoSaveClassification,
 } from "@/lib/classification-policy";
+import {
+  recordCandidateDecision,
+  recordSkippedDecision,
+} from "@/lib/decision-log";
 
 function normalizeKey(value: string | null | undefined) {
   return (value ?? "")
@@ -103,6 +107,21 @@ export async function reprocessStoredEmailsForUser(userId: string) {
           reviewStatus: "IGNORED",
         },
       });
+
+      await recordSkippedDecision(
+        userId,
+        {
+          gmailMessageId: candidate.gmailMessageId,
+          emailThreadId: candidate.emailThreadId,
+          emailSubject: candidate.emailSubject,
+          emailFrom: candidate.emailFrom,
+          emailDate: candidate.emailDate,
+        },
+        classification,
+        "Email was previously ignored by the user; kept ignored on reprocess.",
+        "reprocess",
+      );
+
       ignored += 1;
       continue;
     }
@@ -137,8 +156,12 @@ export async function reprocessStoredEmailsForUser(userId: string) {
     });
 
     if (shouldConfirm) {
-      const saveResult =
-        await saveCandidateAsApplicationWithAudit(updatedCandidate);
+      const saveResult = await saveCandidateAsApplicationWithAudit(
+        updatedCandidate,
+        {
+          trigger: "reprocess",
+        },
+      );
 
       if (saveResult.application) {
         confirmed += 1;
@@ -146,8 +169,20 @@ export async function reprocessStoredEmailsForUser(userId: string) {
         pending += 1;
       }
     } else if (shouldIgnore) {
+      await recordCandidateDecision(
+        updatedCandidate,
+        "ignored",
+        "Auto-ignored on reprocess (low confidence or not a tracked application update).",
+        "reprocess",
+      );
       ignored += 1;
     } else {
+      await recordCandidateDecision(
+        updatedCandidate,
+        "review_weak",
+        "Email was job-related but was not safe enough to auto-save on reprocess.",
+        "reprocess",
+      );
       pending += 1;
     }
   }

@@ -5,6 +5,10 @@ import { decryptText, encryptText } from "@/lib/security";
 import { classifyEmail } from "@/lib/classifier";
 import { saveCandidateAsApplicationWithAudit } from "@/lib/application-writer";
 import { addSyncLog } from "@/lib/sync-log";
+import {
+  recordCandidateDecision,
+  recordSkippedDecision,
+} from "@/lib/decision-log";
 import type { User } from "@prisma/client";
 import {
   shouldAutoIgnoreClassification,
@@ -295,6 +299,21 @@ export async function processGmailMessageForUser(
       },
     );
 
+    await recordSkippedDecision(
+      user.id,
+      {
+        gmailMessageId: messageId,
+        emailThreadId: message.threadId ?? null,
+        emailSubject: subject || null,
+        emailFrom: from || null,
+        emailDate:
+          emailDate && !Number.isNaN(emailDate.getTime()) ? emailDate : null,
+      },
+      classification,
+      classification.summary,
+      trigger,
+    );
+
     return "skipped_low_confidence";
   }
 
@@ -327,7 +346,9 @@ export async function processGmailMessageForUser(
   });
 
   if (canAutoConfirm) {
-    const saveResult = await saveCandidateAsApplicationWithAudit(candidate);
+    const saveResult = await saveCandidateAsApplicationWithAudit(candidate, {
+      trigger,
+    });
 
     if (!saveResult.application) {
       await addSyncLog(
@@ -406,6 +427,13 @@ export async function processGmailMessageForUser(
       confidence: classification.confidence,
       summary: classification.summary,
     },
+  );
+
+  await recordCandidateDecision(
+    candidate,
+    "review_weak",
+    "Email was job-related but was not safe enough to auto-save.",
+    trigger,
   );
 
   return "pending_review";
