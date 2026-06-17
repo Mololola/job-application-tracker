@@ -50,6 +50,7 @@ const atsDomains = [
   "myworkdayjobs",
   "greenhouse",
   "lever",
+  "ashby",
   "ashbyhq",
   "smartrecruiters",
   "icims",
@@ -60,6 +61,12 @@ const atsDomains = [
   "personio",
   "teamtailor",
   "talent",
+  "workable",
+  "recruitee",
+  "breezy",
+  "pinpoint",
+  "candidate",
+  "applicant",
 ];
 
 const genericCompanyWords = new Set([
@@ -825,14 +832,77 @@ function looksLikeCompany(value: string | null | undefined): value is string {
     )
   )
     return false;
-  if (/^(this|our|your|my|este|esta|tu|su|co|com|mail|email)\b/i.test(cleaned))
-    return false;
   if (
-    /\b(application|candidate|position|role|job|empleo|candidatura|solicitud|recommendation|recommended|interview|assessment|engineer|engineering|developer|software|backend|frontend|fullstack|full-stack|machine learning|data scientist|data analyst|product manager|graduate|junior|senior)\b/i.test(
-      cleaned,
+    atsDomains.some(
+      (domain) => lower === domain || lower.startsWith(`${domain} `),
     )
   )
     return false;
+  if (/^(this|our|your|my|este|esta|tu|su|co|com|mail|email)\b/i.test(cleaned))
+    return false;
+  // Reject only if the value is essentially a pure role title (every significant
+  // word is a role/seniority word). Still rejects "Software Engineer", but now
+  // accepts real companies that contain role words, e.g. "Soar Software Development".
+  const roleOnlyWords = new Set([
+    "application",
+    "candidate",
+    "position",
+    "role",
+    "job",
+    "empleo",
+    "candidatura",
+    "solicitud",
+    "recommendation",
+    "recommended",
+    "interview",
+    "assessment",
+    "engineer",
+    "engineering",
+    "developer",
+    "development",
+    "software",
+    "backend",
+    "frontend",
+    "fullstack",
+    "full-stack",
+    "machine",
+    "learning",
+    "data",
+    "scientist",
+    "analyst",
+    "product",
+    "manager",
+    "graduate",
+    "junior",
+    "senior",
+    "intern",
+    "internship",
+    "lead",
+    "principal",
+    "program",
+    "programme",
+    "trainee",
+    "scheme",
+    "team",
+    "the",
+    "a",
+    "an",
+    "of",
+    "de",
+  ]);
+  const sigWords = lower.split(/\s+/).filter((w) => w.length > 1);
+  if (sigWords.length > 0 && sigWords.every((w) => roleOnlyWords.has(w)))
+    return false;
+  // Reject contact-line junk that sometimes gets scraped as a "company":
+  // phone numbers, emails, URLs, telephone labels.
+  if (
+    /@|https?:\/\/|www\.|telephone|tel:|phone|\+?\d[\d()\s-]{6,}/i.test(cleaned)
+  )
+    return false;
+  // Reject values that are mostly digits/symbols rather than letters.
+  const letterCount = (cleaned.match(/[a-zA-ZÁÉÍÓÚÑáéíóúñ]/g) ?? []).length;
+  if (letterCount < cleaned.replace(/\s/g, "").length * 0.5) return false;
+
   return /[a-zA-Z]/.test(cleaned);
 }
 
