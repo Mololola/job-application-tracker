@@ -30,3 +30,5 @@ Thumbs.db
 client_secret*.json
 tokens*.json
 
+
+tsconfig.tsbuildinfo

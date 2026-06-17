@@ -21,7 +21,8 @@ function normalizeHistoryId(value: unknown) {
 
 function parseGmailExpiration(value: string | number | null | undefined) {
   if (!value) return null;
-  const asNumber = typeof value === "number" ? value : Number.parseInt(value, 10);
+  const asNumber =
+    typeof value === "number" ? value : Number.parseInt(value, 10);
   if (!Number.isFinite(asNumber)) return null;
   return new Date(asNumber);
 }
@@ -37,15 +38,30 @@ export function getWebhookUrl() {
   return `${baseUrl}/api/gmail/webhook${secret ? `?token=${encodeURIComponent(secret)}` : ""}`;
 }
 
-export async function runWatchCatchupForUser(user: User, trigger = "watch_catchup") {
+export async function runWatchCatchupForUser(
+  user: User,
+  trigger = "watch_catchup",
+) {
   const days = Math.max(1, Math.min(14, intEnv("GMAIL_WATCH_CATCHUP_DAYS", 2)));
-  await addSyncLog(user.id, trigger, `Running recent Gmail catch-up scan for the last ${days} day(s).`);
+  await addSyncLog(
+    user.id,
+    trigger,
+    `Running recent Gmail catch-up scan for the last ${days} day(s).`,
+  );
   const result = await syncGmailForUser(user, days, trigger);
-  await addSyncLog(user.id, `${trigger}_complete`, "Recent Gmail catch-up scan completed.", result);
+  await addSyncLog(
+    user.id,
+    `${trigger}_complete`,
+    "Recent Gmail catch-up scan completed.",
+    result,
+  );
   return result;
 }
 
-export async function startGmailWatchForUser(user: User, options: { runCatchup?: boolean } = {}) {
+export async function startGmailWatchForUser(
+  user: User,
+  options: { runCatchup?: boolean } = {},
+) {
   const topicName = getConfiguredTopicName();
   const gmail = await getGmailClientForUser(user);
 
@@ -71,12 +87,17 @@ export async function startGmailWatchForUser(user: User, options: { runCatchup?:
     },
   });
 
-  await addSyncLog(user.id, "watch_start", "Gmail real-time listener started.", {
-    topicName,
-    historyId,
-    expiration: expiration?.toISOString() ?? null,
-    catchupEnabled: options.runCatchup !== false,
-  });
+  await addSyncLog(
+    user.id,
+    "watch_start",
+    "Gmail real-time listener started.",
+    {
+      topicName,
+      historyId,
+      expiration: expiration?.toISOString() ?? null,
+      catchupEnabled: options.runCatchup !== false,
+    },
+  );
 
   if (options.runCatchup !== false) {
     await runWatchCatchupForUser(updated, "watch_catchup");
@@ -102,7 +123,11 @@ export async function stopGmailWatchForUser(user: User) {
 }
 
 export async function renewGmailWatchForUser(user: User) {
-  await addSyncLog(user.id, "watch_renew", "Renewing Gmail real-time listener.");
+  await addSyncLog(
+    user.id,
+    "watch_renew",
+    "Renewing Gmail real-time listener.",
+  );
   return startGmailWatchForUser(user, { runCatchup: true });
 }
 
@@ -147,16 +172,32 @@ export async function processGmailPushPayload(payload: GmailPushPayload) {
     };
   }
 
-  await addSyncLog(user.id, "push_received", "Gmail push notification received.", payload);
+  await addSyncLog(
+    user.id,
+    "push_received",
+    "Gmail push notification received.",
+    payload,
+  );
 
   if (!user.gmailHistoryId) {
-    const scanDays = Math.max(1, Math.min(30, intEnv("GMAIL_PUSH_BACKFILL_DAYS", 7)));
+    const scanDays = Math.max(
+      1,
+      Math.min(30, intEnv("GMAIL_PUSH_BACKFILL_DAYS", 7)),
+    );
     const backfill = await syncGmailForUser(user, scanDays, "push_backfill");
     await prisma.user.update({
       where: { id: user.id },
-      data: { gmailHistoryId: String(payload.historyId), gmailPushEnabled: true },
+      data: {
+        gmailHistoryId: String(payload.historyId),
+        gmailPushEnabled: true,
+      },
     });
-    await addSyncLog(user.id, "push_backfill", "No stored Gmail history ID existed, so a short backfill scan was run.", backfill);
+    await addSyncLog(
+      user.id,
+      "push_backfill",
+      "No stored Gmail history ID existed, so a short backfill scan was run.",
+      backfill,
+    );
     return { ok: true, reason: "backfilled", result: backfill };
   }
 
@@ -187,8 +228,15 @@ export async function processGmailPushPayload(payload: GmailPushPayload) {
 
     let emptyHistoryCatchup = null;
     if (history.ids.length === 0) {
-      const catchupDays = Math.max(1, Math.min(7, intEnv("GMAIL_PUSH_EMPTY_HISTORY_CATCHUP_DAYS", 1)));
-      emptyHistoryCatchup = await syncGmailForUser(user, catchupDays, "push_empty_history_catchup");
+      const catchupDays = Math.max(
+        1,
+        Math.min(7, intEnv("GMAIL_PUSH_EMPTY_HISTORY_CATCHUP_DAYS", 1)),
+      );
+      emptyHistoryCatchup = await syncGmailForUser(
+        user,
+        catchupDays,
+        "push_empty_history_catchup",
+      );
     }
 
     await prisma.user.update({
@@ -214,22 +262,65 @@ export async function processGmailPushPayload(payload: GmailPushPayload) {
       emptyHistoryCatchup,
     };
 
-    await addSyncLog(user.id, "push_processed", "Gmail push notification processed.", result);
+    await addSyncLog(
+      user.id,
+      "push_processed",
+      "Gmail push notification processed.",
+      result,
+    );
     return { ok: true, reason: "processed", result };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
 
-    const scanDays = Math.max(1, Math.min(30, intEnv("GMAIL_PUSH_BACKFILL_DAYS", 7)));
-    const backfill = await syncGmailForUser(user, scanDays, "push_history_recovery");
+    // Dead OAuth token: retrying and backfilling will also fail, and Pub/Sub
+    // retries every failed push forever (that is the flood of identical
+    // webhook_failed logs). Disable push, flag for reconnect, and return ok so
+    // Pub/Sub stops hammering this endpoint.
+    if (message.includes("invalid_grant")) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { gmailPushEnabled: false },
+      });
+      await addSyncLog(
+        user.id,
+        "gmail_reconnect_required",
+        "Gmail access is invalid (invalid_grant). Real-time sync disabled — please reconnect Gmail in Settings.",
+        { error: message },
+      );
+      return { ok: true, reason: "reconnect_required", error: message };
+    }
+
+    const scanDays = Math.max(
+      1,
+      Math.min(30, intEnv("GMAIL_PUSH_BACKFILL_DAYS", 7)),
+    );
+    const backfill = await syncGmailForUser(
+      user,
+      scanDays,
+      "push_history_recovery",
+    );
     await prisma.user.update({
       where: { id: user.id },
-      data: { gmailHistoryId: String(payload.historyId), gmailPushEnabled: true },
+      data: {
+        gmailHistoryId: String(payload.historyId),
+        gmailPushEnabled: true,
+      },
     });
-    await addSyncLog(user.id, "push_history_recovery", "Gmail history processing failed, so a short recovery scan was run.", {
-      error: message,
-      backfill,
-    });
+    await addSyncLog(
+      user.id,
+      "push_history_recovery",
+      "Gmail history processing failed, so a short recovery scan was run.",
+      {
+        error: message,
+        backfill,
+      },
+    );
 
-    return { ok: true, reason: "history_recovered", error: message, result: backfill };
+    return {
+      ok: true,
+      reason: "history_recovered",
+      error: message,
+      result: backfill,
+    };
   }
 }

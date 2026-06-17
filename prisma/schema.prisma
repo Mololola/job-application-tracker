@@ -67,6 +67,7 @@ model User {
   applications         Application[]
   emailCandidates      EmailCandidate[]
   syncLogs             SyncLog[]
+  decisionLogs         DecisionLog []
 }
 
 model Application {
@@ -83,8 +84,14 @@ model Application {
   tasks      Task[]
   candidates EmailCandidate[]
 
+  companyNormalized String?           
+  refIdsJson        String?            
+  senderDomainsJson String?            
+  atsSlugsJson      String?   
+
   @@index([userId])
   @@index([company])
+  @@index([companyNormalized]) 
   @@index([status])
 }
 
@@ -122,6 +129,49 @@ model Task {
   @@index([deadline])
 }
 
+model DecisionLog {
+  id                   String             @id @default(cuid())
+  userId               String
+
+  // email identity
+  gmailMessageId       String?
+  emailThreadId        String?
+  emailSubject         String?
+  emailFrom            String?
+  emailDate            DateTime?
+
+  // final routing decision (DecisionOutcome union in lib/decision-log.ts)
+  decision             String
+  reason               String?
+  trigger              String?            // 'push' | 'watch_catchup' | 'reprocess' | 'manual_review' | ...
+
+  // classification snapshot (denormalized for fast filtering on the debug page)
+  eventType            EventType?
+  status               ApplicationStatus?
+  confidence           Float?
+
+  // extraction snapshot
+  company              String?
+  position             String?
+  refIdsJson           String?            // JSON string[] of normalized reference tokens
+
+  // matching snapshot
+  matchedApplicationId String?
+  bestScore            Float?
+  secondScore          Float?
+  scoreGap             Float?
+
+  // full structured trace (JSON DecisionTrace) for /debug/decisions
+  trace                String?
+
+  createdAt            DateTime           @default(now())
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([gmailMessageId])
+  @@index([decision])
+}
+
 model EmailCandidate {
   id             String            @id @default(cuid())
   userId         String
@@ -146,6 +196,11 @@ model EmailCandidate {
   updatedAt      DateTime          @updatedAt
   user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   application    Application?      @relation(fields: [applicationId], references: [id])
+
+  refIdsJson       String?           
+  messageIdHeader  String?           
+  inReplyToHeader  String?          
+  referencesHeader String?           
 
   @@index([userId])
   @@index([reviewStatus])

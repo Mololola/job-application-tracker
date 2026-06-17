@@ -11,6 +11,10 @@ import type {
   EventType,
   TaskType,
 } from "@prisma/client";
+import {
+  recordCandidateDecision,
+  decisionOutcomeFromAction,
+} from "@/lib/decision-log";
 
 function clean(value: string | null | undefined, fallback: string) {
   const text = value?.trim();
@@ -601,6 +605,7 @@ export type SaveCandidateAction =
 export type SaveCandidateOptions = {
   allowCreateFromReview?: boolean;
   forceApplicationId?: string | null;
+  trigger?: string;
 };
 
 export type SaveCandidateResult = {
@@ -618,6 +623,7 @@ export async function saveCandidateAsApplicationWithAudit(
   options: SaveCandidateOptions = {},
 ): Promise<SaveCandidateResult> {
   const allowCreateFromReview = options.allowCreateFromReview === true;
+  const trigger = options.trigger ?? "save";
   const forcedApplication = options.forceApplicationId
     ? await prisma.application.findFirst({
         where: {
@@ -700,6 +706,14 @@ export async function saveCandidateAsApplicationWithAudit(
         taskType: candidate.taskType,
         confidence: candidate.confidence,
       },
+    );
+
+    await recordCandidateDecision(
+      candidate,
+      "review_unmatched",
+      result.reason,
+      trigger,
+      result.matchedApplicationId,
     );
 
     return result;
@@ -865,6 +879,14 @@ export async function saveCandidateAsApplicationWithAudit(
       taskType: candidate.taskType,
       confidence: candidate.confidence,
     },
+  );
+
+  await recordCandidateDecision(
+    candidate,
+    decisionOutcomeFromAction(result.action),
+    result.reason,
+    trigger,
+    result.matchedApplicationId,
   );
 
   return result;
