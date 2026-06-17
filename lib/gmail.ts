@@ -8,6 +8,7 @@ import { addSyncLog } from "@/lib/sync-log";
 import {
   recordCandidateDecision,
   recordSkippedDecision,
+  toJsonArray,
 } from "@/lib/decision-log";
 import type { User } from "@prisma/client";
 import {
@@ -342,6 +343,7 @@ export async function processGmailMessageForUser(
       summary: classification.summary,
       confidence: classification.confidence,
       reviewStatus: canAutoConfirm ? "CONFIRMED" : "PENDING",
+      refIdsJson: toJsonArray(classification.refIds),
     },
   });
 

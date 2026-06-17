@@ -17,6 +17,7 @@ export type Classification = {
   deadline: Date | null;
   confidence: number;
   summary: string;
+  refIds?: string[];
 };
 
 type MatchResult = {
@@ -1790,7 +1791,47 @@ function shouldSkipAmbiguousRecruiterEmail(
   );
 }
 
+function extractReferenceIds(text: string): string[] {
+  const ids = new Set<string>();
+
+  const patterns: RegExp[] = [
+    // "Ref" / "Reference" / "Requisition" / "Req" + ID (separator required)
+    /\b(?:reference|requisition|ref|req)\s*(?:id|no|number|code)?[:#.\s]+([A-Za-z0-9][A-Za-z0-9\-_/]{2,24})\b/gi,
+    // "Job/Vacancy/Posting/Position" must be qualified (id/no/number/code/ref)
+    /\b(?:job|vacancy|posting|position)\s*(?:id|no|number|code|reference|ref)[:#.\s]+([A-Za-z0-9][A-Za-z0-9\-_/]{2,24})\b/gi,
+    // Spanish: Referencia / ID de la oferta / Ref. oferta
+    /\b(?:referencia|id\s*de\s*la\s*oferta|ref\.?\s*oferta)[:#.\s]+([A-Za-z0-9][A-Za-z0-9\-_/]{2,24})\b/gi,
+    // Workday-style requisition (e.g. JR-0012345)
+    /\b(JR[-_]?\d{4,})\b/gi,
+    // Greenhouse job id embedded in a URL (?gh_jid=12345)
+    /[?&]gh_jid=(\d{4,})/gi,
+    // Lever posting UUID in a URL
+    /jobs\.lever\.co\/[^/\s]+\/([0-9a-fA-F-]{12,})/gi,
+  ];
+
+  for (const re of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(text)) !== null) {
+      const raw = (match[1] ?? "").toUpperCase().replace(/[\s#.]/g, "");
+      // Require a digit so we never capture plain words like "REF: TEAM".
+      if (raw.length >= 3 && /\d/.test(raw)) {
+        ids.add(raw);
+      }
+    }
+  }
+
+  return Array.from(ids).slice(0, 10);
+}
+
 export function classifyEmail(email: RawEmail): Classification {
+  const result = classifyEmailInner(email);
+  const refIds = extractReferenceIds(
+    `${email.subject || ""}\n${email.body || email.snippet || ""}`,
+  );
+  return refIds.length > 0 ? { ...result, refIds } : result;
+}
+
+function classifyEmailInner(email: RawEmail): Classification {
   const subject = email.subject || "";
   const body = email.body || email.snippet || "";
   const textWithNewlines = `${subject}\n${body}`;
