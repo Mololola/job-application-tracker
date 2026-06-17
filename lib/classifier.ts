@@ -1331,6 +1331,17 @@ function isRecommendationOrAlert(
   from: string,
   subject: string,
 ): boolean {
+  // Dedicated alert / connection-request addresses are NEVER application
+  // updates, regardless of body content. Real application confirmations come
+  // from a different address, so this is safe.
+  const fromLower = from.toLowerCase();
+  if (
+    fromLower.includes("jobalerts-noreply@") ||
+    fromLower.includes("invitations@linkedin.com")
+  ) {
+    return true;
+  }
+
   const fromNormalized = normalizeForMatching(from);
   const subjectNormalized = normalizeForMatching(subject);
   const platformSender = [...jobBoardDomains, "jobalerts-noreply"].some(
@@ -1340,17 +1351,29 @@ function isRecommendationOrAlert(
   const obviousSubject = containsAny(subjectNormalized, [
     "job opportunity",
     "job opportunity from",
+    "job opportunities",
     "ad response",
     "re ad response",
     "suitable application for",
     "job alert",
+    "job alerts",
     "alerta de empleo",
+    "alertas de empleo",
     "our recommendation",
     "recommended",
+    "recommended jobs",
     "hire feed",
     "don't forget to apply",
     "dont forget to apply",
     "solicitar ahora",
+    "jobs in",
+    "new jobs",
+    "jobs for you",
+    "new job opportunities",
+    "empleos para ti",
+    "ofertas para ti",
+    "nuevas ofertas",
+    "vacantes para ti",
   ]);
 
   return (
