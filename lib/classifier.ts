@@ -50,6 +50,7 @@ const atsDomains = [
   "myworkdayjobs",
   "greenhouse",
   "lever",
+  "ashby",
   "ashbyhq",
   "smartrecruiters",
   "icims",
@@ -60,6 +61,12 @@ const atsDomains = [
   "personio",
   "teamtailor",
   "talent",
+  "workable",
+  "recruitee",
+  "breezy",
+  "pinpoint",
+  "candidate",
+  "applicant",
 ];
 
 const genericCompanyWords = new Set([
@@ -825,14 +832,77 @@ function looksLikeCompany(value: string | null | undefined): value is string {
     )
   )
     return false;
-  if (/^(this|our|your|my|este|esta|tu|su|co|com|mail|email)\b/i.test(cleaned))
-    return false;
   if (
-    /\b(application|candidate|position|role|job|empleo|candidatura|solicitud|recommendation|recommended|interview|assessment|engineer|engineering|developer|software|backend|frontend|fullstack|full-stack|machine learning|data scientist|data analyst|product manager|graduate|junior|senior)\b/i.test(
-      cleaned,
+    atsDomains.some(
+      (domain) => lower === domain || lower.startsWith(`${domain} `),
     )
   )
     return false;
+  if (/^(this|our|your|my|este|esta|tu|su|co|com|mail|email)\b/i.test(cleaned))
+    return false;
+  // Reject only if the value is essentially a pure role title (every significant
+  // word is a role/seniority word). Still rejects "Software Engineer", but now
+  // accepts real companies that contain role words, e.g. "Soar Software Development".
+  const roleOnlyWords = new Set([
+    "application",
+    "candidate",
+    "position",
+    "role",
+    "job",
+    "empleo",
+    "candidatura",
+    "solicitud",
+    "recommendation",
+    "recommended",
+    "interview",
+    "assessment",
+    "engineer",
+    "engineering",
+    "developer",
+    "development",
+    "software",
+    "backend",
+    "frontend",
+    "fullstack",
+    "full-stack",
+    "machine",
+    "learning",
+    "data",
+    "scientist",
+    "analyst",
+    "product",
+    "manager",
+    "graduate",
+    "junior",
+    "senior",
+    "intern",
+    "internship",
+    "lead",
+    "principal",
+    "program",
+    "programme",
+    "trainee",
+    "scheme",
+    "team",
+    "the",
+    "a",
+    "an",
+    "of",
+    "de",
+  ]);
+  const sigWords = lower.split(/\s+/).filter((w) => w.length > 1);
+  if (sigWords.length > 0 && sigWords.every((w) => roleOnlyWords.has(w)))
+    return false;
+  // Reject contact-line junk that sometimes gets scraped as a "company":
+  // phone numbers, emails, URLs, telephone labels.
+  if (
+    /@|https?:\/\/|www\.|telephone|tel:|phone|\+?\d[\d()\s-]{6,}/i.test(cleaned)
+  )
+    return false;
+  // Reject values that are mostly digits/symbols rather than letters.
+  const letterCount = (cleaned.match(/[a-zA-ZÁÉÍÓÚÑáéíóúñ]/g) ?? []).length;
+  if (letterCount < cleaned.replace(/\s/g, "").length * 0.5) return false;
+
   return /[a-zA-Z]/.test(cleaned);
 }
 
@@ -933,7 +1003,7 @@ function looksLikeRoleCandidate(value: string | null | undefined): boolean {
     )
   )
     return false;
-  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|disenador|diseñador|analista|datos|producto)\b/i.test(
+  return /\b(engineer|engineering|developer|software|backend|frontend|front end|fullstack|full stack|data|machine|learning|analyst|designer|product|manager|graduate|junior|senior|intern|architect|specialist|consultant|coordinator|administrator|owner|executive|scientist|technician|lead|principal|java|python|javascript|typescript|react|cloud|devops|qa|test|r d|research|arquitectura|desarrollador|desarrolladora|ingeniero|ingeniera|arquitecto|consultor|especialista|tecnico|coordinador|administrador|disenador|diseñador|analista|datos|producto)\b/i.test(
     normalized,
   );
 }
@@ -999,7 +1069,7 @@ function extractStructuredPosition(
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const next = lines[index + 1];
-    if (looksLikeRoleCandidate(line) && next && /[·•]/.test(next)) {
+    if (looksLikeRoleCandidate(line) && next && /[·•∙・‧]/.test(next)) {
       const value = cleanupPosition(line);
       if (value) return value;
     }
@@ -1101,7 +1171,10 @@ function extractCompany(
 
 function cleanupPosition(value: string): string | null {
   const cleaned = stripLeadingArticles(value)
-    .replace(/^(?:puesto|cargo|position|role|vacante)\s+(?:de\s+)?/i, "")
+    .replace(
+      /^(?:job\s*title|puesto|cargo|position|role|rol|vacante|t[ií]tulo(?:\s+del?\s+puesto)?)\s*[:\-–—]?\s*(?:de\s+)?/i,
+      "",
+    )
     .replace(/\s+-\s*\d{2,}\s*$/g, "")
     .replace(/\s+#?\d{3,}\s*$/g, "")
     .replace(/\s*\(job\s*id\s*[^)]*\)/gi, "")
@@ -1198,7 +1271,7 @@ function extractPosition(
     const value = cleanupPosition(
       (combined.match(pattern) ?? compact.match(pattern))?.[1] ?? "",
     );
-    if (value) return value;
+    if (value && looksLikeRoleCandidate(value)) return value;
   }
 
   return null;
@@ -1862,7 +1935,15 @@ function classifyEmailInner(email: RawEmail): Classification {
   }
 
   const company = extractCompany(textWithNewlines, email.from, subject);
-  const position = extractPosition(textWithNewlines, subject);
+  const rawPosition = extractPosition(textWithNewlines, subject);
+  // If the extracted "position" is identical to the company, it's a mis-capture
+  // of the company name, not a real role — drop it.
+  const position =
+    rawPosition &&
+    company &&
+    normalizeForMatching(rawPosition) === normalizeForMatching(company)
+      ? null
+      : rawPosition;
   const deadline = extractDeadline(textWithNewlines);
 
   if (signal) {
