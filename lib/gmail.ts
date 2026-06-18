@@ -145,6 +145,8 @@ function stripHtml(html: string): string {
     .replace(/<\/li>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&zwnj;|&zwj;|&nbsp;|&shy;/gi, " ")
+    .replace(/&middot;|&centerdot;/gi, "\u00b7")
+    .replace(/&bull;|&bullet;/gi, "\u2022")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -191,9 +193,22 @@ function extractBodyFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
     const plain = payload.parts
       .filter((part) => part.mimeType?.includes("text/plain"))
       .map(extractBodyFromPayload)
-      .join("\n");
+      .join("\n")
+      .trim();
 
-    if (plain.trim()) return plain;
+    // LinkedIn "application sent" emails ship a one-line text/plain stub while
+    // the role/company card lives only in the HTML part. When the plain text is
+    // too thin to hold those details, fall back to the richer HTML part.
+    if (plain.length < 200) {
+      const html = payload.parts
+        .filter((part) => part.mimeType?.includes("text/html"))
+        .map(extractBodyFromPayload)
+        .join("\n")
+        .trim();
+      if (html.length > plain.length) return html;
+    }
+
+    if (plain) return plain;
 
     return payload.parts.map(extractBodyFromPayload).join("\n");
   }

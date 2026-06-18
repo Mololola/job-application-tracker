@@ -1069,7 +1069,7 @@ function extractStructuredPosition(
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     const next = lines[index + 1];
-    if (looksLikeRoleCandidate(line) && next && /[·•]/.test(next)) {
+    if (looksLikeRoleCandidate(line) && next && /[·•∙・‧]/.test(next)) {
       const value = cleanupPosition(line);
       if (value) return value;
     }
@@ -1171,7 +1171,10 @@ function extractCompany(
 
 function cleanupPosition(value: string): string | null {
   const cleaned = stripLeadingArticles(value)
-    .replace(/^(?:puesto|cargo|position|role|vacante)\s+(?:de\s+)?/i, "")
+    .replace(
+      /^(?:job\s*title|puesto|cargo|position|role|rol|vacante|t[ií]tulo(?:\s+del?\s+puesto)?)\s*[:\-–—]?\s*(?:de\s+)?/i,
+      "",
+    )
     .replace(/\s+-\s*\d{2,}\s*$/g, "")
     .replace(/\s+#?\d{3,}\s*$/g, "")
     .replace(/\s*\(job\s*id\s*[^)]*\)/gi, "")
