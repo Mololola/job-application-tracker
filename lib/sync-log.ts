@@ -23,18 +23,22 @@ export async function addSyncLog(
       },
     });
 
-    // Keep the local database small for personal use.
-    const oldLogs = await prisma.syncLog.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      skip: 250,
-      select: { id: true },
-    });
-
-    if (oldLogs.length > 0) {
-      await prisma.syncLog.deleteMany({
-        where: { id: { in: oldLogs.map((log) => log.id) } },
+    // Keep the local database small for personal use. Running this prune on
+    // every write hammers SQLite's single writer under bursty webhook traffic,
+    // so only prune occasionally — the 250 cap doesn't need to be exact.
+    if (Math.random() < 0.05) {
+      const oldLogs = await prisma.syncLog.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        skip: 250,
+        select: { id: true },
       });
+
+      if (oldLogs.length > 0) {
+        await prisma.syncLog.deleteMany({
+          where: { id: { in: oldLogs.map((log) => log.id) } },
+        });
+      }
     }
   } catch (error) {
     // Logging must never break Gmail sync.
@@ -48,7 +52,9 @@ export async function addSystemSyncLog(
   details?: unknown,
 ) {
   try {
-    const user = await prisma.user.findFirst({ orderBy: { updatedAt: "desc" } });
+    const user = await prisma.user.findFirst({
+      orderBy: { updatedAt: "desc" },
+    });
     if (!user) {
       console.log(`[${trigger}] ${message}`, details ?? "");
       return;

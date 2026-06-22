@@ -1175,17 +1175,27 @@ function cleanupPosition(value: string): string | null {
       /^(?:job\s*title|puesto|cargo|position|role|rol|vacante|t[ií]tulo(?:\s+del?\s+puesto)?)\s*[:\-–—]?\s*(?:de\s+)?/i,
       "",
     )
+    .replace(/^(?:of|for|as|to)\s+(?:the\s+)?/i, "")
     .replace(/\s+-\s*\d{2,}\s*$/g, "")
     .replace(/\s+#?\d{3,}\s*$/g, "")
     .replace(/\s*\(job\s*id\s*[^)]*\)/gi, "")
     .replace(/\s*\(ref(?:erence)?\s*[^)]*\)/gi, "")
     .replace(/\s*\(\s*[A-Z]?\d{3,}[A-Z0-9]*\s*\)/gi, "")
     .replace(
+      /\s*[\(\[]\s*(?:job\s*)?(?:id|ref(?:erence)?|req(?:uisition)?)\b[^)\]]*[\)\]]/gi,
+      "",
+    )
+    .replace(/\s*[\u2010–\u2015\u2212\–]\s*(?:19|20)\d{2}\b\s*$/g, "")
+    .replace(
       /\b(has been sent|has been successfully sent|was sent|successfully sent|application has been sent|application sent|has just been read|has been read|has been viewed)\b.*$/i,
       "",
     )
     .replace(
       /\b(opportunity|role|position|vacancy|puesto|cargo|rol|vacante)\b\.?$/i,
+      "",
+    )
+    .replace(
+      /\s*[\u2010\u2011\u2012\u2013\u2014\u2015\u2212-]\s*(?:19|20)\d{2}\b\s*$/g,
       "",
     )
     .replace(
@@ -1264,6 +1274,8 @@ function extractPosition(
     /(?:regarding|about)\s+your\s+application\s+for\s+([^\n.!?]{2,130})(?:[.!?,\n\r]|$)/i,
     /(?:interview for|assessment for|coding challenge for)\s+([^\n.!?]{2,130})(?:\s+(?:at|with)\s+|[.!?,\n\r]|$)/i,
     /(?:entrevista para|evaluacion para|prueba tecnica para)\s+([^\n.!?]{2,130})(?:\s+en\s+|[.!?,\n\r]|$)/i,
+    // "your continued interest in <Company>'s <Role> (SDE) opportunities/role/team"
+    /\binterest in\s+(?:[A-Z][\w&.'\u2019-]*(?:['\u2019]s)?\s+)?([A-Z][A-Za-z0-9 ,/&+-]{3,70}?)\s*(?:\([^)]{1,20}\))?\s+(?:opportunit\w*|roles?|positions?|openings?|team|program)/,
     /(?:position|role|job title|puesto|cargo)\s*[:\-–—]\s*([^\n]{2,130})/i,
   ];
 
@@ -1880,8 +1892,9 @@ function extractReferenceIds(text: string): string[] {
     /[?&]gh_jid=(\d{4,})/gi,
     // Lever posting UUID in a URL
     /jobs\.lever\.co\/[^/\s]+\/([0-9a-fA-F-]{12,})/gi,
+    // Bare "ID: 12345" / "(ID: 3201662)" (e.g. Amazon job emails)
+    /\bid\s*[:#]\s*([A-Za-z0-9][A-Za-z0-9\-_/]{2,24})\b/gi,
   ];
-
   for (const re of patterns) {
     let match: RegExpExecArray | null;
     while ((match = re.exec(text)) !== null) {
